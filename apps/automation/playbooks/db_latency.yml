@@ -1,0 +1,79 @@
+---
+# DB Latency Response Playbook
+# Diagnose and fix database slowness on DDEV
+
+- name: DB Latency Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Investigating database latency"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check MySQL process list
+      shell: "cd {{ ddev_dir }} && ddev mysql -e 'SHOW FULL PROCESSLIST;' 2>/dev/null"
+      register: mysql_processlist
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check slow query count
+      shell: "cd {{ ddev_dir }} && ddev mysql -e 'SHOW GLOBAL STATUS LIKE \"Slow_queries\";' 2>/dev/null"
+      register: slow_queries
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check MySQL status
+      shell: "cd {{ ddev_dir }} && ddev mysql -e 'SHOW STATUS WHERE Variable_name IN (\"Threads_connected\", \"Threads_running\", \"Questions\", \"Uptime\");' 2>/dev/null"
+      register: mysql_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Restart DDEV database
+      shell: "cd {{ ddev_dir }} && ddev restart db"
+      register: db_restart
+
+    - name: Wait for database to initialize
+      pause:
+        seconds: 10
+
+    - name: Verify database connectivity
+      shell: "cd {{ ddev_dir }} && ddev mysql -e 'SELECT 1;' 2>/dev/null && echo 'DB OK'"
+      register: db_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile report
+      set_fact:
+        db_report:
+          process_count: "{{ mysql_processlist.stdout_lines | length | default(0) }}"
+          slow_queries: "{{ slow_queries.stdout | default('N/A') }}"
+          mysql_status: "{{ mysql_status.stdout_lines | default([]) }}"
+          db_restarted: true
+          db_accessible: "{{ 'DB OK' in db_check.stdout | default('') }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: "{{ 'DB OK' in db_check.stdout | default('') }}"
+          message: "Database latency response completed"
+          details: "{{ db_report }}"
+      delegate_to: localhost
+      ignore_errors: true

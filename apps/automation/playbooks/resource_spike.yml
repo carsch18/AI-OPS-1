@@ -1,0 +1,86 @@
+---
+# Resource Spike Response Playbook
+# Check and diagnose resource issues on DDEV server
+
+- name: Resource Spike Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Investigating resource spike"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check CPU usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"
+      register: cpu_usage
+      changed_when: false
+
+    - name: Check memory usage
+      command: "free -m"
+      register: memory_info
+      changed_when: false
+
+    - name: Check disk usage
+      command: "df -h"
+      register: disk_info
+      changed_when: false
+
+    - name: Check Docker container stats
+      shell: "docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' | head -10"
+      register: docker_stats
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get top CPU processes
+      shell: "ps aux --sort=-%cpu | head -6"
+      register: top_cpu
+      changed_when: false
+
+    - name: Get top memory processes
+      shell: "ps aux --sort=-%mem | head -6"
+      register: top_mem
+      changed_when: false
+
+    - name: Check DDEV status
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile resource report
+      set_fact:
+        resource_report:
+          cpu_usage: "{{ cpu_usage.stdout | default('N/A') }}"
+          memory: "{{ memory_info.stdout_lines[1:3] | default([]) }}"
+          disk: "{{ disk_info.stdout_lines[1:5] | default([]) }}"
+          docker_stats: "{{ docker_stats.stdout_lines | default([]) }}"
+          top_cpu_processes: "{{ top_cpu.stdout_lines[1:4] | default([]) }}"
+          top_mem_processes: "{{ top_mem.stdout_lines[1:4] | default([]) }}"
+          ddev_status: "{{ 'OK' if 'OK' in ddev_status.stdout | default('') else 'UNKNOWN' }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "Resource spike investigation completed - CPU: {{ cpu_usage.stdout | default('N/A') }}%"
+          details: "{{ resource_report }}"
+      delegate_to: localhost
+      ignore_errors: true

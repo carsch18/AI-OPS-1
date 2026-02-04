@@ -1,0 +1,110 @@
+---
+# Netdata Docker Restart Playbook
+# Restart the Netdata container for monitoring
+
+- name: Restart Netdata Docker Container
+  hosts: docker_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    container_name: "{{ netdata_container | default('netdata') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting Netdata container restart"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check if Netdata container exists
+      command: "docker inspect {{ container_name }}"
+      register: container_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Container not found - report error
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "failed"
+          success: false
+          message: "Netdata container '{{ container_name }}' not found"
+      delegate_to: localhost
+      when: container_check.rc != 0
+
+    - name: Fail if container not found
+      fail:
+        msg: "Container {{ container_name }} not found on host"
+      when: container_check.rc != 0
+
+    - name: Get container status before restart
+      shell: "docker inspect --format='{{ '{{' }}.State.Status{{ '}}' }}' {{ container_name }}"
+      register: status_before
+      changed_when: false
+
+    - name: Restart Netdata container
+      command: "docker restart {{ container_name }}"
+      register: docker_restart
+
+    - name: Wait for container to initialize
+      pause:
+        seconds: 10
+
+    - name: Get container status after restart
+      shell: "docker inspect --format='{{ '{{' }}.State.Status{{ '}}' }}' {{ container_name }}"
+      register: status_after
+      changed_when: false
+
+    - name: Test Netdata API
+      uri:
+        url: "http://localhost:19999/api/v1/info"
+        method: GET
+        timeout: 10
+      register: netdata_api_check
+      ignore_errors: true
+      delegate_to: "{{ inventory_hostname }}"
+
+    - name: Report success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "Netdata container restarted successfully"
+          details:
+            container: "{{ container_name }}"
+            status_before: "{{ status_before.stdout }}"
+            status_after: "{{ status_after.stdout }}"
+            api_accessible: "{{ netdata_api_check.status | default(0) == 200 }}"
+      delegate_to: localhost
+      when: status_after.stdout == 'running'
+
+    - name: Report failure
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "failed"
+          success: false
+          message: "Netdata container failed to restart"
+          details:
+            container: "{{ container_name }}"
+            status: "{{ status_after.stdout }}"
+      delegate_to: localhost
+      when: status_after.stdout != 'running'
+      ignore_errors: true

@@ -1,0 +1,87 @@
+---
+# DDEV Restart Playbook
+# Restart DDEV services on remote server (WordPress)
+
+- name: Restart DDEV Services
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting DDEV restart"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check DDEV status before restart
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status_before
+      ignore_errors: true
+      changed_when: false
+
+    - name: Log current status
+      debug:
+        msg: "DDEV Status: {{ ddev_status_before.stdout_lines[:5] if ddev_status_before.stdout_lines is defined else 'Unknown' }}"
+
+    - name: Execute DDEV restart
+      shell: "cd {{ ddev_dir }} && ddev restart"
+      register: ddev_restart
+      ignore_errors: false
+
+    - name: Wait for DDEV to stabilize
+      pause:
+        seconds: 10
+
+    - name: Verify DDEV status after restart
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status_after
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check if DDEV is running
+      shell: "cd {{ ddev_dir }} && ddev describe -j | grep -o '\"status\":\"[^\"]*\"' | head -1"
+      register: ddev_running_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Report success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "DDEV restarted successfully"
+          details:
+            output: "{{ ddev_restart.stdout_lines[-10:] if ddev_restart.stdout_lines is defined else [] }}"
+            status: "{{ ddev_status_after.stdout_lines[:5] if ddev_status_after.stdout_lines is defined else [] }}"
+      delegate_to: localhost
+      when: ddev_restart.rc == 0
+
+    - name: Report failure
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "failed"
+          success: false
+          message: "DDEV restart failed"
+          details:
+            error: "{{ ddev_restart.stderr if ddev_restart.stderr is defined else 'Unknown error' }}"
+      delegate_to: localhost
+      when: ddev_restart.rc != 0
+      ignore_errors: true

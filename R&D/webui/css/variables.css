@@ -1,0 +1,244 @@
+/* ═══════════════════════════════════════════════════════════════════════════════
+   CEREBRO DESIGN SYSTEM - CSS Variables
+   Theme: Dark Ops (Black + Neon Pink)
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ─────────────────────────────────────────────────────────────────────────────
+     COLOR PALETTE
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  /* Backgrounds */
+  --bg-primary: #0D0D0D;
+  --bg-secondary: #141419;
+  --bg-tertiary: #1A1A2E;
+  --bg-elevated: #1E1E2D;
+  --bg-hover: #252538;
+  --bg-active: #2A2A40;
+  
+  /* Brand Colors - Pink Spectrum */
+  --pink-50: #FFF0F5;
+  --pink-100: #FFE4ED;
+  --pink-200: #FFCCD9;
+  --pink-300: #FFB3C7;
+  --pink-400: #FF80AB;
+  --pink-500: #FF2E97;
+  --pink-600: #E6007E;
+  --pink-700: #CC006E;
+  --pink-800: #99005A;
+  --pink-900: #660040;
+  
+  /* Primary Accent */
+  --accent-primary: #FF2E97;
+  --accent-primary-hover: #FF4DA6;
+  --accent-primary-active: #E6007E;
+  --accent-primary-glow: rgba(255, 46, 151, 0.4);
+  --accent-primary-subtle: rgba(255, 46, 151, 0.15);
+  
+  /* Secondary Accent */
+  --accent-secondary: #FF6B9D;
+  --accent-secondary-hover: #FF85B1;
+  --accent-secondary-glow: rgba(255, 107, 157, 0.3);
+  
+  /* Semantic Colors */
+  --color-success: #00F5D4;
+  --color-success-bg: rgba(0, 245, 212, 0.15);
+  --color-success-glow: rgba(0, 245, 212, 0.4);
+  
+  --color-warning: #FEE440;
+  --color-warning-bg: rgba(254, 228, 64, 0.15);
+  --color-warning-glow: rgba(254, 228, 64, 0.4);
+  
+  --color-error: #FF4444;
+  --color-error-bg: rgba(255, 68, 68, 0.15);
+  --color-error-glow: rgba(255, 68, 68, 0.4);
+  
+  --color-info: #00B4D8;
+  --color-info-bg: rgba(0, 180, 216, 0.15);
+  --color-info-glow: rgba(0, 180, 216, 0.4);
+  
+  /* Text Colors */
+  --text-primary: #FFFFFF;
+  --text-secondary: #B8B8C8;
+  --text-tertiary: #6B6B80;
+  --text-muted: #4A4A5A;
+  --text-inverse: #0D0D0D;
+  
+  /* Border Colors */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --border-accent: var(--accent-primary);
+  
+  /* Chart Colors */
+  --chart-pink: #FF2E97;
+  --chart-cyan: #00F5D4;
+  --chart-yellow: #FEE440;
+  --chart-orange: #FF9F43;
+  --chart-purple: #A855F7;
+  --chart-blue: #3B82F6;
+  --chart-green: #22C55E;
+  --chart-red: #EF4444;
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     TYPOGRAPHY
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  
+  /* Font Sizes */
+  --text-xs: 0.6875rem;    /* 11px */
+  --text-sm: 0.75rem;      /* 12px */
+  --text-base: 0.875rem;   /* 14px */
+  --text-lg: 1rem;         /* 16px */
+  --text-xl: 1.125rem;     /* 18px */
+  --text-2xl: 1.25rem;     /* 20px */
+  --text-3xl: 1.5rem;      /* 24px */
+  --text-4xl: 2rem;        /* 32px */
+  --text-5xl: 2.5rem;      /* 40px */
+  
+  /* Font Weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  
+  /* Line Heights */
+  --leading-none: 1;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  
+  /* Letter Spacing */
+  --tracking-tight: -0.025em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.05em;
+  --tracking-widest: 0.1em;
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     SPACING
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --space-0: 0;
+  --space-1: 0.25rem;      /* 4px */
+  --space-2: 0.5rem;       /* 8px */
+  --space-3: 0.75rem;      /* 12px */
+  --space-4: 1rem;         /* 16px */
+  --space-5: 1.25rem;      /* 20px */
+  --space-6: 1.5rem;       /* 24px */
+  --space-8: 2rem;         /* 32px */
+  --space-10: 2.5rem;      /* 40px */
+  --space-12: 3rem;        /* 48px */
+  --space-16: 4rem;        /* 64px */
+  --space-20: 5rem;        /* 80px */
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     BORDERS & RADIUS
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  
+  --border-width: 1px;
+  --border-width-2: 2px;
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     SHADOWS & EFFECTS
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+  
+  --shadow-glow-pink: 0 0 20px var(--accent-primary-glow), 0 0 40px rgba(255, 46, 151, 0.2);
+  --shadow-glow-cyan: 0 0 20px var(--color-success-glow), 0 0 40px rgba(0, 245, 212, 0.2);
+  --shadow-glow-error: 0 0 20px var(--color-error-glow);
+  
+  --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     TRANSITIONS
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --transition-fast: 100ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+  --transition-slower: 500ms ease;
+  
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     Z-INDEX SCALE
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-fixed: 300;
+  --z-modal-backdrop: 400;
+  --z-modal: 500;
+  --z-popover: 600;
+  --z-tooltip: 700;
+  --z-toast: 800;
+  --z-max: 9999;
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     LAYOUT
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 56px;
+  --chat-width: 400px;
+  
+  /* ─────────────────────────────────────────────────────────────────────────────
+     COMPONENT SPECIFIC
+     ───────────────────────────────────────────────────────────────────────────── */
+  
+  /* Cards */
+  --card-bg: var(--bg-tertiary);
+  --card-border: var(--border-subtle);
+  --card-radius: var(--radius-lg);
+  --card-padding: var(--space-4);
+  
+  /* Buttons */
+  --btn-height-sm: 28px;
+  --btn-height-md: 36px;
+  --btn-height-lg: 44px;
+  
+  /* Inputs */
+  --input-height: 36px;
+  --input-bg: var(--bg-secondary);
+  --input-border: var(--border-default);
+  --input-focus-border: var(--accent-primary);
+  
+  /* Charts */
+  --chart-grid-color: rgba(255, 255, 255, 0.05);
+  --chart-axis-color: rgba(255, 255, 255, 0.1);
+  --chart-line-width: 2;
+  --chart-point-radius: 3;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   DARK MODE ADJUSTMENTS (if needed for light mode toggle later)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms;
+    --transition-base: 0ms;
+    --transition-slow: 0ms;
+    --transition-slower: 0ms;
+  }
+}

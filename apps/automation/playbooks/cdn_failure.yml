@@ -1,0 +1,145 @@
+---
+# CDN Failure Response Playbook
+# Diagnose CDN issues and implement failover strategies
+
+- name: CDN Failure Response
+  hosts: "{{ target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    cdn_provider: "{{ provider | default('cloudflare') }}"
+    origin_url: "{{ url | default('http://localhost') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Investigating CDN failure"
+      ignore_errors: true
+
+    # 1. Test CDN health
+    - name: Test CDN response time
+      uri:
+        url: "{{ origin_url }}"
+        method: HEAD
+        timeout: 10
+      register: cdn_test
+      ignore_errors: true
+
+    - name: CDN response status
+      debug:
+        msg: "CDN {{ 'ACCESSIBLE' if cdn_test.status is defined and cdn_test.status in [200, 301, 302] else 'FAILED' }}"
+
+    # 2. Check DNS CNAME records
+    - name: Check DNS configuration
+      shell: "dig {{ origin_url | regex_replace('https?://', '') }} CNAME +short"
+      register: dns_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: DNS CNAME status
+      debug:
+        msg: "DNS CNAME: {{ dns_check.stdout if dns_check.stdout else 'No CNAME found' }}"
+
+    # 3. Verify origin server is responding
+    - name: Test origin server directly
+      uri:
+        url: "{{ origin_url }}"
+        method: GET
+        timeout: 5
+        validate_certs: no
+        follow_redirects: none
+      register: origin_test
+      ignore_errors: true
+
+    - name: Origin server status
+      debug:
+        msg: "Origin server {{ 'RESPONSIVE' if origin_test.status is defined else 'UNREACHABLE' }}"
+
+    # 4. Measure response time comparison
+    - name: Measure origin response time
+      shell: "curl -o /dev/null -s -w '%{time_total}' {{ origin_url }}"
+      register: origin_time
+      ignore_errors: true
+      changed_when: false
+
+    - name: Response time via origin
+      debug:
+        msg: "Origin response time: {{ origin_time.stdout }}s"
+
+    # 5. Check CDN cache status
+    - name: Test cache headers
+      uri:
+        url: "{{ origin_url }}"
+        method: HEAD
+        return_content: yes
+      register: cache_headers
+      ignore_errors: true
+
+    - name: Cache status
+      debug:
+        msg: "Cache headers: {{ cache_headers.cf_cache_status | default('Unknown') }}"
+
+    # 6. Purge CDN cache if available (Cloudflare example)
+    - name: Attempt cache purge
+      set_fact:
+        cache_purge_needed: true
+      when: cdn_provider == 'cloudflare'
+
+    - name: Log cache purge recommendation
+      debug:
+        msg: "Cache purge recommended via Cloudflare API (requires API credentials)"
+
+    # 7. Test failover to direct origin
+    - name: Configure direct origin access
+      blockinfile:
+        path: /etc/nginx/conf.d/cdn_failover.conf
+        create: yes
+        block: |
+          # Temporary CDN bypass during incident
+          location / {
+              proxy_pass {{ origin_url }};
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+          }
+      become: true
+      register: failover_configured
+      ignore_errors: true
+
+    - name: Reload nginx for failover
+      service:
+        name: nginx
+        state: reloaded
+      become: true
+      when: failover_configured is changed
+      ignore_errors: true
+
+    # 8. Report status
+    - name: Compile CDN diagnostics
+      set_fact:
+        cdn_diagnostics:
+          cdn_accessible: "{{ cdn_test.status is defined and cdn_test.status in [200, 301, 302] }}"
+          origin_accessible: "{{ origin_test.status is defined }}"
+          origin_response_time: "{{ origin_time.stdout }}s"
+          dns_cname: "{{ dns_check.stdout }}"
+          failover_enabled: "{{ failover_configured is changed }}"
+          recommendation: "{{ 'Contact CDN provider support' if not (cdn_test.status is defined) else 'Monitor CDN recovery' }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "CDN failure investigation completed"
+          details: "{{ cdn_diagnostics }}"
+      ignore_errors: true

@@ -1,0 +1,133 @@
+---
+# DDoS/Brute Force Mitigation Playbook
+# Traffic analysis and automated security countermeasures
+
+- name: DDoS and Brute Force Mitigation
+  hosts: "{{ target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    rate_limit: "{{ limit | default('100/minute') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Initiating DDoS/brute force mitigation"
+      ignore_errors: true
+
+    # 1. Analyze traffic patterns
+    - name: Get current connections by IP
+      shell: "netstat -tn 2>/dev/null | grep ESTABLISHED | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | head -10"
+      register: connection_analysis
+      ignore_errors: true
+      changed_when: false
+
+    - name: Top connecting IPs
+      debug:
+        msg: "{{ connection_analysis.stdout_lines }}"
+
+    # 2. Identify top attacking IPs
+    - name: Extract attacking IPs (more than 50 connections)
+      shell: "netstat -tn 2>/dev/null | grep ESTABLISHED | awk '{print $5}' | cut -d: -f1 | sort | uniq -c | sort -rn | awk '$1 > 50 {print $2}' | head -5"
+      register: attacking_ips
+      ignore_errors: true
+      changed_when: false
+
+    - name: Attacking IPs identified
+      debug:
+        msg: "Potential attackers: {{ attacking_ips.stdout_lines }}"
+
+    # 3. Enable rate limiting (nginx example)
+    - name: Check if nginx config exists
+      stat:
+        path: /etc/nginx/nginx.conf
+      register: nginx_conf
+      ignore_errors: true
+
+    - name: Enable nginx rate limiting
+      blockinfile:
+        path: /etc/nginx/conf.d/rate_limit.conf
+        create: yes
+        block: |
+          limit_req_zone $binary_remote_addr zone=general:10m rate={{ rate_limit }};
+          limit_req zone=general burst=20 nodelay;
+      become: true
+      when: nginx_conf.stat.exists
+      register: rate_limit_enabled
+      ignore_errors: true
+
+    - name: Reload nginx if config changed
+      service:
+        name: nginx
+        state: reloaded
+      become: true
+      when: rate_limit_enabled is changed
+      ignore_errors: true
+
+    # 4. Block top offending IPs via iptables
+    - name: Block attacking IPs with iptables
+      command: "iptables -A INPUT -s {{ item }} -j DROP"
+      become: true
+      with_items: "{{ attacking_ips.stdout_lines }}"
+      when: attacking_ips.stdout_lines | length > 0
+      register: iptables_blocks
+      ignore_errors: true
+
+    - name: Save iptables rules
+      shell: "iptables-save > /etc/iptables/rules.v4"
+      become: true
+      when: iptables_blocks is changed
+      ignore_errors: true
+
+    # 5. Check login attempts (brute force detection)
+    - name: Count failed SSH login attempts
+      shell: "grep 'Failed password' /var/log/auth.log 2>/dev/null | wc -l || echo 0"
+      register: failed_logins
+      ignore_errors: true
+      changed_when: false
+
+    - name: Failed login count
+      debug:
+        msg: "Failed login attempts: {{ failed_logins.stdout }}"
+
+    # 6. Monitor traffic for 60 seconds
+    - name: Wait and reassess
+      wait_for:
+        timeout: 10
+
+    - name: Re-check connection counts
+      shell: "netstat -tn 2>/dev/null | grep ESTABLISHED | wc -l"
+      register: post_connections
+      ignore_errors: true
+      changed_when: false
+
+    # 7. Report mitigation status
+    - name: Compile mitigation report
+      set_fact:
+        mitigation_report:
+          blocked_ips: "{{ attacking_ips.stdout_lines }}"
+          blocked_ip_count: "{{ attacking_ips.stdout_lines | length }}"
+          rate_limiting_enabled: "{{ rate_limit_enabled is changed }}"
+          failed_login_attempts: "{{ failed_logins.stdout }}"
+          active_connections_after: "{{ post_connections.stdout }}"
+          recommendation: "Monitor traffic patterns for next 30 minutes"
+
+    - name: Report success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "DDoS/brute force mitigation completed"
+          details: "{{ mitigation_report }}"
+      ignore_errors: true

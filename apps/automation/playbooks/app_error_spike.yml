@@ -1,0 +1,81 @@
+---
+# App Error Spike Response Playbook
+# Collect and analyze application errors from DDEV
+
+- name: App Error Spike Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Investigating application error spike"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Get web container logs
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | tail -100"
+      register: web_logs
+      ignore_errors: true
+      changed_when: false
+
+    - name: Count error occurrences
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | grep -i 'error\\|fatal\\|exception\\|warning' | wc -l"
+      register: error_count
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get unique error patterns
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | grep -i 'error\\|fatal' | awk '{print $NF}' | sort | uniq -c | sort -rn | head -5"
+      register: error_patterns
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check WordPress debug log
+      shell: "cd {{ ddev_dir }} && ddev exec cat wp-content/debug.log 2>/dev/null | tail -30 || echo 'No debug.log'"
+      register: wp_debug_log
+      ignore_errors: true
+      changed_when: false
+
+    - name: Restart DDEV if high error count
+      shell: "cd {{ ddev_dir }} && ddev restart"
+      register: ddev_restart
+      when: error_count.stdout | int > 50
+
+    - name: Wait for restart
+      pause:
+        seconds: 15
+      when: ddev_restart is changed
+
+    - name: Compile error report
+      set_fact:
+        error_report:
+          total_errors: "{{ error_count.stdout | default('0') }}"
+          top_patterns: "{{ error_patterns.stdout_lines | default([]) }}"
+          recent_logs: "{{ web_logs.stdout_lines[-20:] | default([]) }}"
+          wp_debug: "{{ wp_debug_log.stdout_lines[-10:] | default([]) }}"
+          service_restarted: "{{ ddev_restart is changed }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "App error investigation completed - {{ error_count.stdout | default('0') }} errors found"
+          details: "{{ error_report }}"
+      delegate_to: localhost
+      ignore_errors: true

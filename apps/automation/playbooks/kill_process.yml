@@ -1,0 +1,98 @@
+---
+# Kill Process Playbook
+# Safely terminate runaway processes
+
+- name: Kill Runaway Process
+  hosts: "{{ target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    process_name: "{{ process | default('') }}"
+    process_pid: "{{ pid | default('') }}"
+    signal: "{{ kill_signal | default('TERM') }}"
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting process termination"
+      ignore_errors: true
+
+    - name: Validate input
+      fail:
+        msg: "Either process name or PID must be provided"
+      when: process_name == '' and process_pid == ''
+
+    - name: Find process by name
+      command: "pgrep -f {{ process_name }}"
+      register: found_pids
+      when: process_name != '' and process_pid == ''
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get process info before kill
+      command: "ps -p {{ process_pid if process_pid else found_pids.stdout_lines[0] }} -o pid,ppid,cmd"
+      register: process_info
+      ignore_errors: true
+      changed_when: false
+      when: process_pid != '' or (found_pids is defined and found_pids.stdout_lines | length > 0)
+
+    - name: Kill process by PID
+      command: "kill -{{ signal }} {{ process_pid }}"
+      become: true
+      when: process_pid != ''
+      register: kill_result
+
+    - name: Kill process by name
+      command: "pkill -{{ signal }} -f {{ process_name }}"
+      become: true
+      when: process_name != '' and process_pid == ''
+      register: kill_result
+      ignore_errors: true
+
+    - name: Wait for process to terminate
+      wait_for:
+        timeout: 3
+
+    - name: Verify process is gone
+      command: "pgrep -f {{ process_name if process_name else process_pid }}"
+      register: verify_kill
+      ignore_errors: true
+      changed_when: false
+
+    - name: Report success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "Process terminated successfully"
+          details:
+            process: "{{ process_name if process_name else process_pid }}"
+            signal: "{{ signal }}"
+      when: verify_kill.rc != 0
+
+    - name: Report partial success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: false
+          message: "Process may still be running"
+          details:
+            process: "{{ process_name if process_name else process_pid }}"
+            remaining_pids: "{{ verify_kill.stdout_lines | default([]) }}"
+      when: verify_kill.rc == 0
+      ignore_errors: true

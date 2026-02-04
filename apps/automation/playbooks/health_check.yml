@@ -1,0 +1,94 @@
+---
+# Health Check Playbook
+# Comprehensive health verification on DDEV server
+
+- name: System Health Check - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting comprehensive health check"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check system uptime
+      command: "uptime"
+      register: uptime_info
+      changed_when: false
+
+    - name: Check CPU usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"
+      register: cpu_usage
+      changed_when: false
+
+    - name: Check memory
+      command: "free -m"
+      register: memory_info
+      changed_when: false
+
+    - name: Check disk space
+      command: "df -h /"
+      register: disk_info
+      changed_when: false
+
+    - name: Check DDEV status
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check Docker containers
+      shell: "docker ps --format 'table {{.Names}}\t{{.Status}}' | head -10"
+      register: docker_containers
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check network connectivity
+      command: "ping -c 1 8.8.8.8"
+      register: network_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check Netdata container
+      shell: "docker ps | grep netdata && echo 'Netdata OK'"
+      register: netdata_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile health report
+      set_fact:
+        health_report:
+          uptime: "{{ uptime_info.stdout | default('N/A') }}"
+          cpu_usage: "{{ cpu_usage.stdout | default('N/A') }}"
+          memory: "{{ memory_info.stdout_lines[1] | default('N/A') }}"
+          disk: "{{ disk_info.stdout_lines[1] | default('N/A') }}"
+          ddev_ok: "{{ 'OK' in ddev_status.stdout | default('') }}"
+          docker_containers: "{{ docker_containers.stdout_lines | default([]) }}"
+          network_ok: "{{ network_check.rc | default(1) == 0 }}"
+          netdata_ok: "{{ 'Netdata OK' in netdata_check.stdout | default('') }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "Health check completed"
+          details: "{{ health_report }}"
+      delegate_to: localhost
+      ignore_errors: true

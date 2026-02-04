@@ -1,0 +1,109 @@
+version: "3.9"
+
+services:
+  # ==========================================
+  # Netdata - System Monitoring
+  # ==========================================
+  netdata:
+    image: ghcr.io/netdata/netdata:latest
+    container_name: netdata
+    ports:
+      - "19999:19999"
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdataconfig:/etc/netdata
+      - netdatalib:/var/lib/netdata
+      - netdatacache:/var/cache/netdata
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+    environment:
+      - NETDATA_EXTRA_DEB_PACKAGES=python3-pip
+    restart: unless-stopped
+
+  # ==========================================
+  # Postgres Database (Shared)
+  # ==========================================
+  aiops-db:
+    image: postgres:15-alpine
+    container_name: aiops-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: aiops
+      POSTGRES_PASSWORD: aiops_password
+      POSTGRES_DB: peekaping
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # ==========================================
+  # Peekaping - AIOps Dashboard
+  # ==========================================
+  peekaping:
+    image: 0xfurai/peekaping-bundle-postgres:latest
+    container_name: peekaping
+    ports:
+      - "3002:8034"
+      - "3003:8383"
+    environment:
+      DB_HOST: aiops-db
+      DB_PORT: 5432
+      DB_USER: aiops
+      DB_PASS: aiops_password
+      DB_NAME: peekaping
+      TZ: Asia/Kolkata
+    depends_on:
+      - aiops-db
+    restart: unless-stopped
+
+
+  # ==========================================
+  # Ansible-EDA
+  # ==========================================
+  ansible-eda:
+    image: quay.io/ansible/ansible-rulebook:latest
+    container_name: aiops-eda
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../../apps/automation/playbooks:/playbooks:ro
+      - ../../apps/automation/rules:/rules:ro
+      - ../../apps/automation/inventory:/inventory:ro
+    working_dir: /rules
+    command: >
+      ansible-rulebook
+      --rulebook aiops_rulebook.yml
+      -i /inventory/hosts.yml
+      --verbose
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ==========================================
+  # Workflow Engine - Visual Automation
+  # ==========================================
+  workflow-engine:
+    build:
+      context: ../../apps/workflow-engine
+      dockerfile: Dockerfile
+    container_name: workflow-engine
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://aiops:aiops_password@aiops-db:5432/peekaping
+    depends_on:
+      - aiops-db
+    restart: unless-stopped
+
+volumes:
+  netdataconfig:
+  netdatalib:
+  netdatacache:
+  pgdata:
+

@@ -1,0 +1,76 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aiops-ingress
+  namespace: aiops
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # Uncomment when you have a certificate
+    # alb.ingress.kubernetes.io/certificate-arn: ${ACM_CERTIFICATE_ARN}
+spec:
+  rules:
+    - http:
+        paths:
+          # Brain API routes
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          - path: /chat
+            pathType: Exact
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          - path: /pending-actions
+            pathType: Prefix
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          - path: /actions
+            pathType: Prefix
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          - path: /audit-log
+            pathType: Prefix
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: brain-api
+                port:
+                  number: 8000
+          # Web UI (catch-all)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-ui
+                port:
+                  number: 3000

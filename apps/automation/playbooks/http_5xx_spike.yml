@@ -1,0 +1,88 @@
+---
+# HTTP 5xx Spike Response Playbook
+# Collect DDEV logs and restart if needed
+
+- name: HTTP 5xx Error Spike Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Investigating HTTP 5xx error spike"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Get DDEV web logs
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | tail -50"
+      register: web_logs
+      ignore_errors: true
+      changed_when: false
+
+    - name: Count PHP errors
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | grep -i 'error\\|fatal\\|exception\\|5[0-9][0-9]' | wc -l"
+      register: error_count
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get recent PHP errors
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | grep -i 'error\\|fatal\\|exception' | tail -10"
+      register: php_errors
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check DDEV status
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Restart DDEV if many errors
+      shell: "cd {{ ddev_dir }} && ddev restart"
+      register: ddev_restart
+      when: error_count.stdout | int > 20
+
+    - name: Wait for restart
+      pause:
+        seconds: 15
+      when: ddev_restart is changed
+
+    - name: Check error rate after restart
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | tail -20 | grep -i 'error\\|fatal' | wc -l"
+      register: post_error_count
+      ignore_errors: true
+      changed_when: false
+      when: ddev_restart is changed
+
+    - name: Compile investigation report
+      set_fact:
+        investigation_report:
+          error_count_before: "{{ error_count.stdout | default('0') }}"
+          error_count_after: "{{ post_error_count.stdout | default('N/A') }}"
+          recent_errors: "{{ php_errors.stdout_lines[:5] | default([]) }}"
+          ddev_status: "{{ 'OK' if 'OK' in ddev_status.stdout | default('') else 'DEGRADED' }}"
+          service_restarted: "{{ ddev_restart is changed }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "5xx spike investigation completed - {{ error_count.stdout | default('0') }} errors found"
+          details: "{{ investigation_report }}"
+      delegate_to: localhost
+      ignore_errors: true

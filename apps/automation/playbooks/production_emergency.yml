@@ -1,0 +1,90 @@
+---
+# Production Emergency Response Playbook
+# Full DDEV restart with comprehensive checks
+
+- name: Production Emergency Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "EMERGENCY: Starting full system recovery"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Capture current state
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: initial_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Stop all DDEV services
+      shell: "cd {{ ddev_dir }} && ddev stop"
+      register: ddev_stop
+      ignore_errors: true
+
+    - name: Wait for clean shutdown
+      pause:
+        seconds: 5
+
+    - name: Start DDEV services fresh
+      shell: "cd {{ ddev_dir }} && ddev start"
+      register: ddev_start
+
+    - name: Wait for full initialization
+      pause:
+        seconds: 20
+
+    - name: Verify all containers running
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: final_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Verify web access
+      shell: "cd {{ ddev_dir }} && ddev exec curl -s -o /dev/null -w '%{http_code}' http://localhost:80"
+      register: web_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Verify database access
+      shell: "cd {{ ddev_dir }} && ddev mysql -e 'SELECT 1;' && echo 'DB OK'"
+      register: db_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile recovery report
+      set_fact:
+        recovery_report:
+          initial_state: "{{ initial_status.stdout_lines[:3] | default([]) }}"
+          stop_result: "{{ ddev_stop.rc | default(-1) }}"
+          start_result: "{{ ddev_start.rc | default(-1) }}"
+          final_state: "{{ final_status.stdout_lines[:5] | default([]) }}"
+          web_accessible: "{{ web_check.stdout | default('000') == '200' }}"
+          db_accessible: "{{ 'DB OK' in db_check.stdout | default('') }}"
+          recovery_successful: "{{ ddev_start.rc | default(-1) == 0 }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: "{{ recovery_report.recovery_successful }}"
+          message: "EMERGENCY recovery {{ 'SUCCESSFUL' if recovery_report.recovery_successful else 'FAILED' }}"
+          details: "{{ recovery_report }}"
+      delegate_to: localhost
+      ignore_errors: true

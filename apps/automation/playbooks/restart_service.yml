@@ -1,0 +1,78 @@
+---
+# Restart Service Playbook
+# Restart DDEV services on remote server
+
+- name: Restart Service - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+    service_name: "{{ service | default('all') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Restarting DDEV service: {{ service_name }}"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Get status before restart
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: status_before
+      ignore_errors: true
+      changed_when: false
+
+    - name: Restart specific DDEV service
+      shell: "cd {{ ddev_dir }} && ddev restart {{ service_name if service_name != 'all' else '' }}"
+      register: restart_result
+
+    - name: Wait for service stabilization
+      pause:
+        seconds: 15
+
+    - name: Get status after restart
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: status_after
+      ignore_errors: true
+      changed_when: false
+
+    - name: Report success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: "{{ restart_result.rc == 0 }}"
+          message: "DDEV service {{ service_name }} restarted successfully"
+          details:
+            service: "{{ service_name }}"
+            status_before: "{{ status_before.stdout_lines[:3] | default([]) }}"
+            status_after: "{{ status_after.stdout_lines[:3] | default([]) }}"
+      delegate_to: localhost
+      when: restart_result.rc == 0
+
+    - name: Report failure
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "failed"
+          success: false
+          message: "DDEV service restart failed"
+          details:
+            error: "{{ restart_result.stderr | default('Unknown error') }}"
+      delegate_to: localhost
+      when: restart_result.rc != 0
+      ignore_errors: true

@@ -1,0 +1,11 @@
+services:
+  peekaping:
+    image: ghcr.io/0xfurai/peekaping:latest
+    container_name: peekaping
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      - DATABASE_URL=postgres://aiops:aiops_password@aiops-db:5432/peekaping
+    depends_on:
+      - aiops-db

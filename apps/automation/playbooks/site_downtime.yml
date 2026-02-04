@@ -1,0 +1,74 @@
+---
+# Site Downtime Response Playbook
+# Check and restart DDEV WordPress site
+
+- name: Site Downtime Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting site downtime response"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check DDEV status
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check if site is responding
+      shell: "cd {{ ddev_dir }} && ddev exec curl -s -o /dev/null -w '%{http_code}' http://localhost:80 || echo '000'"
+      register: site_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Restart DDEV if site is down
+      shell: "cd {{ ddev_dir }} && ddev restart"
+      register: ddev_restart
+      when: site_check.stdout != '200' or 'stopped' in ddev_status.stdout | default('')
+
+    - name: Wait for DDEV to stabilize
+      pause:
+        seconds: 15
+      when: ddev_restart is changed
+
+    - name: Verify site after restart
+      shell: "cd {{ ddev_dir }} && ddev describe"
+      register: ddev_describe
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile status report
+      set_fact:
+        site_status:
+          initial_status: "{{ ddev_status.stdout_lines[:3] | default([]) }}"
+          site_response: "{{ site_check.stdout | default('unknown') }}"
+          restarted: "{{ ddev_restart is changed }}"
+          final_status: "{{ ddev_describe.stdout_lines[:5] | default([]) }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: "{{ ddev_restart.rc | default(0) == 0 }}"
+          message: "Site downtime response completed"
+          details: "{{ site_status }}"
+      delegate_to: localhost
+      ignore_errors: true

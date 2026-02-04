@@ -1,0 +1,85 @@
+---
+# Page Load Slow Response Playbook
+# Diagnose and fix slow page loads on DDEV
+
+- name: Page Load Slow Response - DDEV
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Investigating slow page loads"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check DDEV container resources
+      shell: "docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' | grep ddev"
+      register: container_stats
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check MySQL slow queries
+      shell: "cd {{ ddev_dir }} && ddev mysql -e 'SHOW FULL PROCESSLIST;' 2>/dev/null | head -20"
+      register: mysql_processes
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check PHP-FPM status
+      shell: "cd {{ ddev_dir }} && ddev exec ps aux | grep php-fpm | head -10"
+      register: php_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Clear OPcache
+      shell: "cd {{ ddev_dir }} && ddev exec php -r 'opcache_reset();' 2>/dev/null || echo 'OPcache not available'"
+      register: opcache_clear
+      ignore_errors: true
+
+    - name: Restart DDEV to clear resources
+      shell: "cd {{ ddev_dir }} && ddev restart"
+      register: ddev_restart
+
+    - name: Wait for DDEV to stabilize
+      pause:
+        seconds: 15
+
+    - name: Test page load time after restart
+      shell: "cd {{ ddev_dir }} && ddev exec curl -s -o /dev/null -w '%{time_total}' http://localhost:80 || echo 'N/A'"
+      register: page_load_time
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile performance report
+      set_fact:
+        performance_report:
+          container_resources: "{{ container_stats.stdout_lines | default([]) }}"
+          mysql_processes: "{{ mysql_processes.stdout_lines[:5] | default([]) }}"
+          php_workers: "{{ php_status.stdout_lines | length | default(0) }}"
+          opcache_cleared: "{{ 'reset' not in opcache_clear.stdout | default('') }}"
+          page_load_time_seconds: "{{ page_load_time.stdout | default('N/A') }}"
+          service_restarted: true
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "Page load optimization completed - Load time: {{ page_load_time.stdout | default('N/A') }}s"
+          details: "{{ performance_report }}"
+      delegate_to: localhost
+      ignore_errors: true

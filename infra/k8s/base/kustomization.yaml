@@ -1,0 +1,22 @@
+# =============================================================================
+# KUBERNETES BASE - Kustomization
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: aiops
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - brain-deployment.yaml
+  - brain-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: aiops
+  app.kubernetes.io/managed-by: kustomize

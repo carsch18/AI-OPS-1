@@ -1,0 +1,17 @@
+{
+    "name": "aiops-dashboard",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "bun run --hot src/server.ts",
+        "build": "bun build src/server.ts --outdir ./dist --target bun",
+        "start": "bun run dist/server.js"
+    },
+    "dependencies": {
+        "hono": "^4.0.0"
+    },
+    "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.0.0"
+    }
+}

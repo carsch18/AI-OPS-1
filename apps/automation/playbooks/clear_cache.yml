@@ -1,0 +1,83 @@
+---
+# Clear Cache Playbook
+# Clear various system and application caches
+
+- name: Clear System Caches
+  hosts: "{{ target_host | default('localhost') }}"
+  gather_facts: true
+  vars:
+    cache_type: "{{ cache | default('system') }}"
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting cache clear for {{ cache_type }}"
+      ignore_errors: true
+
+    - name: Get memory before cache clear
+      command: "free -m"
+      register: mem_before
+      changed_when: false
+
+    - name: Clear system page cache
+      shell: "sync && echo 1 > /proc/sys/vm/drop_caches"
+      become: true
+      when: cache_type in ['system', 'pagecache', 'all']
+      ignore_errors: true
+
+    - name: Clear system dentries and inodes
+      shell: "sync && echo 2 > /proc/sys/vm/drop_caches"
+      become: true
+      when: cache_type in ['dentries', 'all']
+      ignore_errors: true
+
+    - name: Clear all caches
+      shell: "sync && echo 3 > /proc/sys/vm/drop_caches"
+      become: true
+      when: cache_type == 'all'
+      ignore_errors: true
+
+    - name: Clear tmp files older than 7 days
+      find:
+        paths: /tmp
+        age: 7d
+        recurse: true
+      register: old_tmp_files
+      when: cache_type in ['tmp', 'all']
+
+    - name: Remove old tmp files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_tmp_files.files | default([]) }}"
+      when: cache_type in ['tmp', 'all']
+      ignore_errors: true
+      become: true
+
+    - name: Get memory after cache clear
+      command: "free -m"
+      register: mem_after
+      changed_when: false
+
+    - name: Report success
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "Cache {{ cache_type }} cleared successfully"
+          details:
+            cache_type: "{{ cache_type }}"
+            files_removed: "{{ old_tmp_files.files | default([]) | length }}"
+      ignore_errors: true

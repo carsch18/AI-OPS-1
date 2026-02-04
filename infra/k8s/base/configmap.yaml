@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aiops-config
+  namespace: aiops
+data:
+  # Application Settings
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+  
+  # Netdata Configuration (placeholder - update per environment)
+  NETDATA_URL: "http://netdata-agent.monitoring.svc.cluster.local:19999"
+  
+  # Brain API Settings
+  BRAIN_PORT: "8000"
+  BRAIN_WORKERS: "4"
+  
+  # Web UI Settings
+  WEB_PORT: "3000"
+  API_BASE_URL: "http://brain-api.aiops.svc.cluster.local:8000"
+  
+  # Feature Flags
+  ENABLE_EDGE_ML: "true"
+  ENABLE_AUDIT_LOG: "true"
+  ENABLE_HITL: "true"

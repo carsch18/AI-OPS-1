@@ -1,0 +1,80 @@
+---
+# DDEV Health Check Playbook
+# Check DDEV and WordPress site health
+
+- name: DDEV Health Check
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Starting DDEV health check"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Check DDEV status
+      shell: "cd {{ ddev_dir }} && ddev status"
+      register: ddev_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check DDEV describe
+      shell: "cd {{ ddev_dir }} && ddev describe"
+      register: ddev_describe
+      ignore_errors: true
+      changed_when: false
+
+    - name: List DDEV containers
+      shell: "docker ps --filter 'name=ddev' --format '{{ '{{' }}.Names{{ '}}' }}: {{ '{{' }}.Status{{ '}}' }}'"
+      register: ddev_containers
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check DDEV logs for errors
+      shell: "cd {{ ddev_dir }} && ddev logs 2>&1 | tail -20"
+      register: ddev_logs
+      ignore_errors: true
+      changed_when: false
+
+    - name: Test WordPress site (if accessible)
+      uri:
+        url: "https://regenics.ddev.site"
+        method: GET
+        timeout: 10
+        validate_certs: false
+      register: site_check
+      ignore_errors: true
+      delegate_to: "{{ inventory_hostname }}"
+
+    - name: Compile health report
+      set_fact:
+        health_report:
+          ddev_running: "{{ 'OK' in ddev_status.stdout | default('') }}"
+          containers: "{{ ddev_containers.stdout_lines | default([]) }}"
+          site_accessible: "{{ site_check.status | default(0) in [200, 301, 302] }}"
+          recent_logs: "{{ ddev_logs.stdout_lines[-10:] | default([]) }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: "{{ health_report.ddev_running }}"
+          message: "DDEV health check completed"
+          details: "{{ health_report }}"
+      delegate_to: localhost
+      ignore_errors: true

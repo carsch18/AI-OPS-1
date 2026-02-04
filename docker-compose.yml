@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # ==============================================
+  # 🧠 AIOps Brain (Backend)
+  # ==============================================
+  brain:
+    build: 
+      context: ./apps/brain
+      dockerfile: Dockerfile
+    container_name: aiops-brain
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://aiops:aiops_password@postgres:5432/aiops_brain
+      - REDIS_URL=redis://redis:6379/0
+      - NETDATA_URL=http://netdata:19999
+      - JWT_SECRET=dev-secret-key-change-in-prod
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
+      - LOG_LEVEL=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aiops-net
+
+  # ==============================================
+  # 🌐 AIOps Web (Frontend)
+  # ==============================================
+  web:
+    build: 
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: aiops-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - BRAIN_API_URL=http://brain:8000
+      - NETDATA_URL=http://netdata:19999
+    depends_on:
+      brain:
+        condition: service_healthy
+    networks:
+      - aiops-net
+
+  # ==============================================
+  # 🗄️ Database (PostgreSQL)
+  # ==============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: aiops-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=aiops
+      - POSTGRES_PASSWORD=aiops_password
+      - POSTGRES_DB=aiops_brain
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiops -d aiops_brain"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aiops-net
+
+  # ==============================================
+  # ⚡ Cache (Redis)
+  # ==============================================
+  redis:
+    image: redis:7-alpine
+    container_name: aiops-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aiops-net
+
+  # ==============================================
+  # 📊 Monitoring (Netdata)
+  # ==============================================
+  netdata:
+    image: netdata/netdata:latest
+    container_name: aiops-netdata
+    restart: unless-stopped
+    ports:
+      - "19999:19999"
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdataconfig:/etc/netdata
+      - netdatalib:/var/lib/netdata
+      - netdatacache:/var/cache/netdata
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+    environment:
+      - NETDATA_CLAIM_TOKEN=${NETDATA_CLAIM_TOKEN}
+      - NETDATA_CLAIM_URL=${NETDATA_CLAIM_URL}
+      - NETDATA_CLAIM_ROOMS=
+    networks:
+      - aiops-net
+
+networks:
+  aiops-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  netdataconfig:
+  netdatalib:
+  netdatacache:

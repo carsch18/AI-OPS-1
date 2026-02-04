@@ -1,0 +1,163 @@
+---
+# AIOps Event-Driven Ansible Rulebook
+# Receives approved actions from Brain and executes appropriate playbooks
+# Maps incidents to DDEV, Netdata (Docker), and Brain services
+
+- name: AIOps Automation Rulebook
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    # ========================================
+    # DDEV / WordPress Site Actions
+    # ========================================
+    
+    - name: DDEV Restart - restart_service for DDEV
+      condition: event.payload.action_type == "restart_service" or event.payload.action_type == "ddev_restart"
+      action:
+        run_playbook:
+          name: playbooks/ddev_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: DDEV Health Check
+      condition: event.payload.action_type == "health_check" or event.payload.action_type == "ddev_health"
+      action:
+        run_playbook:
+          name: playbooks/ddev_health_check.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: DDEV Collect Logs
+      condition: event.payload.action_type == "http_5xx_spike" or event.payload.action_type == "app_error_spike" or event.payload.action_type == "ddev_logs"
+      action:
+        run_playbook:
+          name: playbooks/ddev_logs.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Site Downtime - DDEV Restart
+      condition: event.payload.action_type == "site_downtime"
+      action:
+        run_playbook:
+          name: playbooks/ddev_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Page Load Slow - DDEV Restart
+      condition: event.payload.action_type == "page_load_slow"
+      action:
+        run_playbook:
+          name: playbooks/ddev_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: DB Latency - DDEV Restart DB
+      condition: event.payload.action_type == "db_latency"
+      action:
+        run_playbook:
+          name: playbooks/ddev_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Production Emergency - DDEV Full Restart
+      condition: event.payload.action_type == "production_emergency"
+      action:
+        run_playbook:
+          name: playbooks/ddev_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    # ========================================
+    # Netdata Docker Container Actions
+    # ========================================
+    
+    - name: Netdata Down - Docker Restart
+      condition: event.payload.action_type == "netdata_down"
+      action:
+        run_playbook:
+          name: playbooks/netdata_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Netdata Container Restart
+      condition: event.payload.target == "netdata"
+      action:
+        run_playbook:
+          name: playbooks/netdata_restart.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Restart Container - Generic Docker
+      condition: event.payload.action_type == "restart_container"
+      action:
+        run_playbook:
+          name: playbooks/restart_container.yml
+          extra_vars:
+            container: "{{ event.payload.target }}"
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    # ========================================
+    # Resource and System Actions
+    # ========================================
+    
+    - name: Resource Spike - Health Check
+      condition: event.payload.action_type == "resource_spike"
+      action:
+        run_playbook:
+          name: playbooks/health_check.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Clear Cache
+      condition: event.payload.action_type == "clear_cache"
+      action:
+        run_playbook:
+          name: playbooks/clear_cache.yml
+          extra_vars:
+            cache: "{{ event.payload.target | default('system') }}"
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Kill Process
+      condition: event.payload.action_type == "kill_process"
+      action:
+        run_playbook:
+          name: playbooks/kill_process.yml
+          extra_vars:
+            process: "{{ event.payload.target }}"
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    # ========================================
+    # Generic / Custom Actions
+    # ========================================
+    
+    - name: Run Custom Playbook
+      condition: event.payload.action_type == "run_playbook" or event.payload.action_type == "custom"
+      action:
+        run_playbook:
+          name: playbooks/health_check.yml
+          extra_vars:
+            action_id: "{{ event.payload.action_id }}"
+            callback: "{{ event.payload.callback_url | default('http://localhost:8000/automation/callback') }}"
+
+    - name: Log unhandled action types
+      condition: event.payload.action_type is defined
+      action:
+        debug:
+          msg: "Received action: {{ event.payload }}"

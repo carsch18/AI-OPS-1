@@ -1,0 +1,71 @@
+---
+# DDEV Logs Playbook
+# Collect and analyze DDEV logs
+
+- name: Collect DDEV Logs
+  hosts: ddev_hosts
+  gather_facts: false
+  vars:
+    callback_url: "{{ callback | default('http://localhost:8000/automation/callback') }}"
+    action_id: "{{ action_id | default('unknown') }}"
+    ddev_dir: "{{ ddev_project_dir | default('~/d1/regenics') }}"
+    log_lines: "{{ lines | default(100) }}"
+
+  tasks:
+    - name: Report start
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "running"
+          message: "Collecting DDEV logs for analysis"
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Get DDEV web logs
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | tail -{{ log_lines }}"
+      register: web_logs
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get DDEV db logs
+      shell: "cd {{ ddev_dir }} && ddev logs -s db 2>&1 | tail -{{ log_lines }}"
+      register: db_logs
+      ignore_errors: true
+      changed_when: false
+
+    - name: Count PHP errors in logs
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | grep -i 'error\\|fatal\\|exception' | wc -l"
+      register: error_count
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get recent PHP errors
+      shell: "cd {{ ddev_dir }} && ddev logs -s web 2>&1 | grep -i 'error\\|fatal\\|exception' | tail -10"
+      register: php_errors
+      ignore_errors: true
+      changed_when: false
+
+    - name: Compile log analysis
+      set_fact:
+        log_analysis:
+          error_count: "{{ error_count.stdout | default('0') }}"
+          recent_errors: "{{ php_errors.stdout_lines | default([]) }}"
+          web_logs_tail: "{{ web_logs.stdout_lines[-20:] | default([]) }}"
+          db_logs_tail: "{{ db_logs.stdout_lines[-10:] | default([]) }}"
+
+    - name: Report results
+      uri:
+        url: "{{ callback_url }}"
+        method: POST
+        body_format: json
+        body:
+          action_id: "{{ action_id }}"
+          status: "completed"
+          success: true
+          message: "DDEV logs collected: {{ error_count.stdout | default('0') }} errors found"
+          details: "{{ log_analysis }}"
+      delegate_to: localhost
+      ignore_errors: true

@@ -1,0 +1,7 @@
+[install]
+# Faster installs
+auto = "force"
+
+[run]
+# Enable hot reload in development
+watch = ["src/**/*.ts"]
