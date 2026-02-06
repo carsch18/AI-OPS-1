@@ -44,6 +44,11 @@ from approval_service import init_approval_service, get_approval_service, Approv
 from workflow_templates import init_template_service, get_template_service, TemplateService
 from workflow_validation import validate_workflow, ValidationResult
 
+# Phase 5E - Autonomous Triggering System
+from confidence_scorer import get_confidence_scorer, calculate_confidence
+from safety_guardrails import get_safety_guardrails, init_safety_guardrails
+from auto_trigger import get_auto_trigger_manager, init_auto_trigger_manager
+
 load_dotenv()
 
 # ============================================================
@@ -71,6 +76,10 @@ async def lifespan(app: FastAPI):
         # Template service + seeding
         template_svc = init_template_service(pool)
         await template_svc.seed_system_templates()
+        
+        # Phase 5E - Autonomous triggering system
+        init_safety_guardrails()
+        init_auto_trigger_manager(executor=executor)
         
         print("⚡ Workflow Engine fully initialized")
     
@@ -100,10 +109,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Import and mount metrics router
-from metrics_api import router as metrics_router
-app.include_router(metrics_router)
-
+# Import and mount remediation workflows router (Phase 5A - Visual Workflows)
+from remediation_workflows import router as remediation_workflows_router
+app.include_router(remediation_workflows_router)
 
 
 # ============================================================
@@ -1661,10 +1669,279 @@ async def list_remediation_categories():
 
 
 # ============================================================
+# PHASE 5E: AUTONOMOUS TRIGGERING SYSTEM
+# ============================================================
+
+@app.get("/api/autonomous/status")
+async def get_autonomous_status():
+    """
+    📊 Get the current autonomous triggering system status.
+    Returns kill switch status, rate limits, and recent activity.
+    """
+    manager = get_auto_trigger_manager()
+    guardrails = get_safety_guardrails()
+    
+    if not manager:
+        return {
+            "enabled": False,
+            "error": "Auto-trigger manager not initialized"
+        }
+    
+    return {
+        **manager.get_status(),
+        "safety": guardrails.get_status() if guardrails else {}
+    }
+
+
+@app.post("/api/autonomous/enable")
+async def enable_autonomous_mode():
+    """
+    ✅ Enable autonomous triggering mode.
+    High-confidence issues will be auto-remediated.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        raise HTTPException(status_code=503, detail="Auto-trigger manager not initialized")
+    
+    manager.enable_autonomous_mode()
+    
+    return {
+        "success": True,
+        "message": "Autonomous mode enabled",
+        "status": manager.get_status()
+    }
+
+
+@app.post("/api/autonomous/disable")
+async def disable_autonomous_mode():
+    """
+    🛑 Disable autonomous triggering mode.
+    Issues will require manual intervention.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        raise HTTPException(status_code=503, detail="Auto-trigger manager not initialized")
+    
+    manager.disable_autonomous_mode()
+    
+    return {
+        "success": True,
+        "message": "Autonomous mode disabled",
+        "status": manager.get_status()
+    }
+
+
+@app.post("/api/autonomous/kill-switch")
+async def toggle_kill_switch(enable: bool = True, reason: str = "Manual activation"):
+    """
+    🚨 Toggle the global kill switch for ALL autonomous operations.
+    When enabled, no automatic remediations will execute.
+    """
+    guardrails = get_safety_guardrails()
+    if not guardrails:
+        raise HTTPException(status_code=503, detail="Safety guardrails not initialized")
+    
+    if enable:
+        guardrails.enable_kill_switch(reason=reason, enabled_by="api")
+        return {
+            "success": True,
+            "kill_switch": "enabled",
+            "reason": reason,
+            "message": "⚠️ KILL SWITCH ACTIVATED - All autonomous operations halted"
+        }
+    else:
+        guardrails.disable_kill_switch(disabled_by="api")
+        return {
+            "success": True,
+            "kill_switch": "disabled",
+            "message": "Kill switch deactivated - Autonomous operations can resume"
+        }
+
+
+@app.get("/api/autonomous/confidence/{workflow_id}")
+async def calculate_workflow_confidence(
+    workflow_id: str,
+    issue_title: str = "Test Issue",
+    issue_severity: str = "high",
+    host: str = "server-01"
+):
+    """
+    📊 Calculate the confidence score for auto-remediating an issue.
+    Returns score (0-100), level, and detailed factor breakdown.
+    """
+    scorer = get_confidence_scorer()
+    
+    # Build mock issue and workflow data
+    issue = {
+        "title": issue_title,
+        "severity": issue_severity,
+        "host": host
+    }
+    
+    workflow = {
+        "id": workflow_id,
+        "success_rate": 95,  # Would load from DB in production
+    }
+    
+    context = {
+        "host": host,
+        "pattern_match": 0.9
+    }
+    
+    result = scorer.calculate(workflow, issue, context)
+    
+    return {
+        "workflow_id": workflow_id,
+        "confidence_score": result.score,
+        "confidence_level": result.level.value,
+        "can_auto_execute": result.can_auto_execute,
+        "requires_approval": result.requires_approval,
+        "recommendation": result.recommendation,
+        "reason": result.reason,
+        "factors": result.factors
+    }
+
+
+@app.get("/api/autonomous/pending-approvals")
+async def get_pending_auto_approvals():
+    """
+    📋 Get list of workflows awaiting approval.
+    These are medium-confidence matches that need human review.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        return {"pending": [], "count": 0}
+    
+    pending = manager.get_pending_approvals()
+    return {
+        "pending": pending,
+        "count": len(pending)
+    }
+
+
+@app.post("/api/autonomous/approve/{request_id}")
+async def approve_auto_request(request_id: str, approved_by: str = "user"):
+    """
+    ✅ Approve a pending autonomous remediation request.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        raise HTTPException(status_code=503, detail="Auto-trigger manager not initialized")
+    
+    result = await manager.approve_request(request_id, approved_by)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    
+    return {
+        "success": True,
+        "action": result.action_taken,
+        "workflow_id": result.workflow_id,
+        "execution_id": result.execution_id,
+        "message": result.message
+    }
+
+
+@app.post("/api/autonomous/reject/{request_id}")
+async def reject_auto_request(request_id: str, rejected_by: str = "user"):
+    """
+    ❌ Reject a pending autonomous remediation request.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        raise HTTPException(status_code=503, detail="Auto-trigger manager not initialized")
+    
+    success = await manager.reject_request(request_id, rejected_by)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    
+    return {
+        "success": True,
+        "message": "Request rejected"
+    }
+
+
+@app.get("/api/autonomous/recent-triggers")
+async def get_recent_auto_triggers(limit: int = 20):
+    """
+    📜 Get recent auto-trigger activity log.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        return {"triggers": [], "count": 0}
+    
+    triggers = manager.get_recent_triggers(limit)
+    return {
+        "triggers": triggers,
+        "count": len(triggers)
+    }
+
+
+@app.get("/api/autonomous/audit-log")
+async def get_autonomous_audit_log(limit: int = 100):
+    """
+    📋 Get the safety audit log for autonomous operations.
+    """
+    guardrails = get_safety_guardrails()
+    if not guardrails:
+        return {"log": [], "count": 0}
+    
+    log = guardrails.get_audit_log(limit)
+    return {
+        "log": log,
+        "count": len(log)
+    }
+
+
+@app.post("/api/autonomous/process-issue")
+async def process_issue_autonomous(
+    issue_title: str,
+    issue_severity: str = "high",
+    host: str = "server-01",
+    message: str = ""
+):
+    """
+    🤖 Process an issue through the autonomous triggering system.
+    Will find matching workflows, calculate confidence, and take appropriate action.
+    """
+    manager = get_auto_trigger_manager()
+    if not manager:
+        raise HTTPException(status_code=503, detail="Auto-trigger manager not initialized")
+    
+    issue = {
+        "title": issue_title,
+        "message": message,
+        "severity": issue_severity,
+        "host": host
+    }
+    
+    results = await manager.process_issue(issue)
+    
+    return {
+        "processed": True,
+        "issue": issue,
+        "results": [
+            {
+                "workflow_id": r.workflow_id,
+                "triggered": r.triggered,
+                "action_taken": r.action_taken,
+                "confidence_score": r.confidence.score,
+                "confidence_level": r.confidence.level.value,
+                "message": r.message
+            }
+            for r in results
+        ],
+        "count": len(results)
+    }
+
+
+# ============================================================
 # RUN SERVER
 # ============================================================
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
+
 

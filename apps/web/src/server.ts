@@ -15,7 +15,7 @@ app.use('/vite.svg', serveStatic({ root: '../workflow-ui/dist' }))
 // API: Get system metrics from Netdata
 app.get('/api/metrics', async (c) => {
   try {
-    const response = await fetch('http://localhost:19998/api/v1/data?chart=system.cpu&after=-60&points=60&format=json')
+    const response = await fetch('http://localhost:19999/api/v1/data?chart=system.cpu&after=-60&points=60&format=json')
     const data = await response.json()
     return c.json(data)
   } catch (error) {
@@ -26,7 +26,7 @@ app.get('/api/metrics', async (c) => {
 // API: Get ALL charts from Netdata
 app.get('/api/charts', async (c) => {
   try {
-    const response = await fetch('http://localhost:19998/api/v1/charts')
+    const response = await fetch('http://localhost:19999/api/v1/charts')
     const data = await response.json()
     return c.json(data)
   } catch (error) {
@@ -40,8 +40,8 @@ app.get('/api/chart/:chart', async (c) => {
   const after = c.req.query('after') || '-60'
   const points = c.req.query('points') || '60'
   try {
-    // Redirect to our backend mock stats
-    const response = await fetch(`${WORKFLOW_ENGINE_URL}/api/chart/${chart}?after=${after}&points=${points}`)
+    // Use original Netdata source for chart data
+    const response = await fetch(`http://localhost:19999/api/v1/data?chart=${chart}&after=${after}&points=${points}&format=json`)
     const data = await response.json()
     return c.json(data)
   } catch (error) {
@@ -158,7 +158,7 @@ app.post('/api/alerts/:id/reject', async (c) => {
 // API: Get system info
 app.get('/api/info', async (c) => {
   try {
-    const response = await fetch('http://localhost:19998/api/v1/info')
+    const response = await fetch('http://localhost:19999/api/v1/info')
     const data = await response.json()
     return c.json(data)
   } catch (error) {
@@ -170,7 +170,7 @@ app.get('/api/info', async (c) => {
 app.get('/api/processes', async (c) => {
   try {
     // Fetch list of charts to find Docker/cgroup CPU charts
-    const chartsResponse = await fetch('http://localhost:19998/api/v1/charts');
+    const chartsResponse = await fetch('http://localhost:19999/api/v1/charts');
     if (!chartsResponse.ok) {
       throw new Error('Failed to fetch charts list');
     }
@@ -187,7 +187,7 @@ app.get('/api/processes', async (c) => {
     // If we have cgroup charts, use those (Docker containers)
     for (const chartId of cgroupCpuCharts.slice(0, 15)) {
       try {
-        const cpuResp = await fetch(`http://localhost:19998/api/v1/data?chart=${chartId}&after=-5&points=1&format=json`);
+        const cpuResp = await fetch(`http://localhost:19999/api/v1/data?chart=${chartId}&after=-5&points=1&format=json`);
         if (cpuResp.ok) {
           const cpuData = await cpuResp.json() as { labels: string[], data: number[][] };
           // Sum all CPU dimensions
@@ -197,7 +197,7 @@ app.get('/api/processes', async (c) => {
           const memChartId = chartId.replace('.cpu', '.mem');
           let memTotal = 0;
           try {
-            const memResp = await fetch(`http://localhost:19998/api/v1/data?chart=${memChartId}&after=-5&points=1&format=json`);
+            const memResp = await fetch(`http://localhost:19999/api/v1/data?chart=${memChartId}&after=-5&points=1&format=json`);
             if (memResp.ok) {
               const memData = await memResp.json() as { labels: string[], data: number[][] };
               // Get RSS or total memory
@@ -222,7 +222,7 @@ app.get('/api/processes', async (c) => {
 
     // If no cgroup charts, try to get system CPU breakdown
     if (processes.length === 0) {
-      const sysResp = await fetch('http://localhost:19998/api/v1/data?chart=system.cpu&after=-5&points=1&format=json');
+      const sysResp = await fetch('http://localhost:19999/api/v1/data?chart=system.cpu&after=-5&points=1&format=json');
       if (sysResp.ok) {
         const sysData = await sysResp.json() as { labels: string[], data: number[][] };
         sysData.labels.slice(1).forEach((label: string, idx: number) => {
@@ -254,11 +254,11 @@ app.get('/api/processes', async (c) => {
 app.get('/api/disk-usage', async (c) => {
   try {
     // Fetch disk space data from Netdata via SSH tunnel
-    const diskResponse = await fetch('http://localhost:19998/api/v1/data?chart=disk_space._&after=-1&points=1&format=json');
+    const diskResponse = await fetch('http://localhost:19999/api/v1/data?chart=disk_space._&after=-1&points=1&format=json');
 
     if (!diskResponse.ok) {
       // Try alternative chart name
-      const altResponse = await fetch('http://localhost:19998/api/v1/charts');
+      const altResponse = await fetch('http://localhost:19999/api/v1/charts');
       const chartsData = await altResponse.json() as { charts: Record<string, { name: string }> };
 
       // Find disk space charts
@@ -268,7 +268,7 @@ app.get('/api/disk-usage', async (c) => {
       let totalDiskBytes = 500000000000; // Default 500GB
 
       for (const chartName of diskCharts.slice(0, 10)) {
-        const chartResponse = await fetch(`http://localhost:19998/api/v1/data?chart=${chartName}&after=-1&points=1&format=json`);
+        const chartResponse = await fetch(`http://localhost:19999/api/v1/data?chart=${chartName}&after=-1&points=1&format=json`);
         if (chartResponse.ok) {
           const chartData = await chartResponse.json() as { labels: string[], data: number[][] };
           const usedIdx = chartData.labels.indexOf('used');
@@ -2448,6 +2448,792 @@ const dashboardHTML = `<!DOCTYPE html>
         .spin {
           animation: spin 1s linear infinite;
         }
+        
+        /* ================================================
+           VISUAL WORKFLOW CANVAS STYLES - Phase 5B
+           ================================================ */
+        
+        /* Workflow Canvas Container */
+        .workflow-canvas-container {
+          background: linear-gradient(135deg, rgba(10, 10, 10, 0.95), rgba(20, 20, 20, 0.95));
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 16px;
+          margin-top: 16px;
+          overflow: hidden;
+          transition: all 0.3s ease;
+        }
+        
+        .workflow-canvas-container.expanded {
+          box-shadow: 0 0 40px rgba(59, 130, 246, 0.2);
+        }
+        
+        .workflow-canvas-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 20px;
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.1));
+          border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        
+        .workflow-canvas-title {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-weight: 600;
+          color: #fff;
+        }
+        
+        .workflow-canvas-title i {
+          color: #3b82f6;
+        }
+        
+        .workflow-canvas-actions {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .workflow-canvas-body {
+          display: flex;
+          height: 500px;
+        }
+        
+        /* Node Palette Sidebar */
+        .node-palette {
+          width: 220px;
+          background: rgba(0, 0, 0, 0.4);
+          border-right: 1px solid rgba(255, 255, 255, 0.05);
+          overflow-y: auto;
+          padding: 12px;
+        }
+        
+        .node-palette-section {
+          margin-bottom: 16px;
+        }
+        
+        .node-palette-title {
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: #737373;
+          padding: 8px 4px;
+          font-weight: 600;
+        }
+        
+        .node-palette-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          cursor: grab;
+          transition: all 0.2s ease;
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid transparent;
+          margin-bottom: 4px;
+        }
+        
+        .node-palette-item:hover {
+          background: rgba(255, 255, 255, 0.05);
+          border-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .node-palette-item:active {
+          cursor: grabbing;
+        }
+        
+        .node-palette-item .node-icon {
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .node-palette-item .node-name {
+          font-size: 12px;
+          color: #e5e5e5;
+        }
+        
+        /* Main Canvas Area */
+        .workflow-canvas {
+          flex: 1;
+          position: relative;
+          overflow: auto;
+          background: 
+            radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+          background-size: 24px 24px;
+        }
+        
+        .workflow-canvas-inner {
+          position: relative;
+          min-width: 1200px;
+          min-height: 600px;
+          padding: 40px;
+        }
+        
+        /* Workflow Nodes */
+        .workflow-node {
+          position: absolute;
+          min-width: 180px;
+          background: rgba(30, 30, 30, 0.95);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+          cursor: move;
+          transition: box-shadow 0.2s ease, transform 0.1s ease, border-color 0.2s ease;
+          user-select: none;
+        }
+        
+        .workflow-node:hover {
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+          transform: translateY(-2px);
+        }
+        
+        .workflow-node.selected {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3), 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        
+        /* Node Status States */
+        .workflow-node.status-pending { border-color: rgba(255, 255, 255, 0.1); }
+        .workflow-node.status-running { 
+          border-color: #3b82f6;
+          animation: nodeRunning 1s ease-in-out infinite;
+        }
+        .workflow-node.status-success { border-color: #10b981; }
+        .workflow-node.status-failed { border-color: #ef4444; }
+        .workflow-node.status-skipped { border-color: #eab308; }
+        
+        @keyframes nodeRunning {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+        }
+        
+        /* Node Header */
+        .workflow-node-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 14px;
+          border-radius: 12px 12px 0 0;
+          color: white;
+          font-weight: 600;
+          font-size: 13px;
+        }
+        
+        .workflow-node-header.trigger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .workflow-node-header.action { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .workflow-node-header.logic { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .workflow-node-header.notification { background: linear-gradient(135deg, #10b981, #059669); }
+        .workflow-node-header.safety { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        
+        .workflow-node-header i {
+          width: 16px;
+          height: 16px;
+        }
+        
+        /* Node Body */
+        .workflow-node-body {
+          padding: 12px 14px;
+          font-size: 11px;
+          color: #a3a3a3;
+        }
+        
+        .workflow-node-config {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        
+        .workflow-node-config-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 8px;
+          background: rgba(255, 255, 255, 0.03);
+          border-radius: 4px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+        }
+        
+        /* Node Connection Points */
+        .node-connector {
+          position: absolute;
+          width: 12px;
+          height: 12px;
+          background: #1e1e1e;
+          border: 2px solid #525252;
+          border-radius: 50%;
+          cursor: crosshair;
+          transition: all 0.2s ease;
+          z-index: 10;
+        }
+        
+        .node-connector:hover {
+          transform: scale(1.3);
+          border-color: #3b82f6;
+          background: #3b82f6;
+        }
+        
+        .node-connector.input {
+          top: 50%;
+          left: -6px;
+          transform: translateY(-50%);
+        }
+        
+        .node-connector.output {
+          top: 50%;
+          right: -6px;
+          transform: translateY(-50%);
+        }
+        
+        .node-connector.output-true {
+          top: 35%;
+          right: -6px;
+          transform: translateY(-50%);
+          border-color: #10b981;
+        }
+        
+        .node-connector.output-false {
+          top: 65%;
+          right: -6px;
+          transform: translateY(-50%);
+          border-color: #ef4444;
+        }
+        
+        /* SVG Edges */
+        .workflow-edges {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+          z-index: 0;
+        }
+        
+        .workflow-edge {
+          fill: none;
+          stroke: #525252;
+          stroke-width: 2;
+          transition: stroke 0.2s ease;
+        }
+        
+        .workflow-edge:hover {
+          stroke: #3b82f6;
+          stroke-width: 3;
+        }
+        
+        .workflow-edge.running {
+          stroke: #3b82f6;
+          stroke-dasharray: 8 4;
+          animation: edgeFlow 1s linear infinite;
+        }
+        
+        .workflow-edge.success { stroke: #10b981; }
+        .workflow-edge.failed { stroke: #ef4444; }
+        
+        @keyframes edgeFlow {
+          from { stroke-dashoffset: 12; }
+          to { stroke-dashoffset: 0; }
+        }
+        
+        .edge-label {
+          font-size: 10px;
+          fill: #737373;
+          pointer-events: none;
+        }
+        
+        /* Template Card with View Flow */
+        .template-card {
+          position: relative;
+        }
+        
+        .template-card-actions {
+          display: flex;
+          gap: 6px;
+          margin-top: 10px;
+          padding-top: 10px;
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .btn-view-flow {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 8px;
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(37, 99, 235, 0.1));
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 8px;
+          color: #60a5fa;
+          font-size: 11px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-view-flow:hover {
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(37, 99, 235, 0.2));
+          border-color: #3b82f6;
+        }
+        
+        .btn-run-template {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 8px;
+          background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.1));
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          border-radius: 8px;
+          color: #34d399;
+          font-size: 11px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-run-template:hover {
+          background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(5, 150, 105, 0.2));
+          border-color: #10b981;
+        }
+        
+        /* Execution Log Panel */
+        .execution-log {
+          width: 280px;
+          background: rgba(0, 0, 0, 0.4);
+          border-left: 1px solid rgba(255, 255, 255, 0.05);
+          padding: 12px;
+          overflow-y: auto;
+        }
+        
+        .execution-log-title {
+          font-size: 12px;
+          font-weight: 600;
+          color: #e5e5e5;
+          margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .execution-log-entry {
+          display: flex;
+          gap: 10px;
+          padding: 8px 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+          font-size: 11px;
+        }
+        
+        .execution-log-entry .status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          margin-top: 4px;
+          flex-shrink: 0;
+        }
+        
+        .execution-log-entry .status-dot.running { background: #3b82f6; animation: pulse 1s infinite; }
+        .execution-log-entry .status-dot.success { background: #10b981; }
+        .execution-log-entry .status-dot.failed { background: #ef4444; }
+        .execution-log-entry .status-dot.pending { background: #525252; }
+        
+        .execution-log-entry .node-name {
+          color: #e5e5e5;
+          font-weight: 500;
+        }
+        
+        .execution-log-entry .node-time {
+          color: #737373;
+          font-family: 'JetBrains Mono', monospace;
+        }
+        
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+        
+        /* ======================================
+           NODE PROPERTY EDITOR MODAL - Phase 5D
+           ====================================== */
+        
+        .node-editor-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.75);
+          backdrop-filter: blur(4px);
+          z-index: 2000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          visibility: hidden;
+          transition: all 0.3s ease;
+        }
+        
+        .node-editor-overlay.active {
+          opacity: 1;
+          visibility: visible;
+        }
+        
+        .node-editor-modal {
+          background: linear-gradient(135deg, #171717 0%, #0f0f0f 100%);
+          border: 1px solid #303030;
+          border-radius: 16px;
+          width: 90%;
+          max-width: 600px;
+          max-height: 85vh;
+          overflow: hidden;
+          transform: scale(0.9) translateY(20px);
+          transition: all 0.3s ease;
+          box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+        }
+        
+        .node-editor-overlay.active .node-editor-modal {
+          transform: scale(1) translateY(0);
+        }
+        
+        .node-editor-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 20px 24px;
+          border-bottom: 1px solid #262626;
+          background: linear-gradient(135deg, #1a1a1a 0%, #111 100%);
+        }
+        
+        .node-editor-header-left {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+        
+        .node-editor-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+        }
+        
+        .node-editor-icon.trigger { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .node-editor-icon.action { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+        .node-editor-icon.logic { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .node-editor-icon.notification { background: linear-gradient(135deg, #10b981, #059669); }
+        .node-editor-icon.safety { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        
+        .node-editor-title-group h3 {
+          color: #f5f5f5;
+          font-size: 18px;
+          font-weight: 600;
+          margin: 0;
+        }
+        
+        .node-editor-title-group p {
+          color: #737373;
+          font-size: 13px;
+          margin: 4px 0 0 0;
+        }
+        
+        .node-editor-close {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          background: transparent;
+          border: 1px solid #303030;
+          color: #a3a3a3;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+        }
+        
+        .node-editor-close:hover {
+          background: #262626;
+          color: #f5f5f5;
+          border-color: #404040;
+        }
+        
+        .node-editor-body {
+          padding: 24px;
+          max-height: 50vh;
+          overflow-y: auto;
+        }
+        
+        .node-editor-body::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .node-editor-body::-webkit-scrollbar-thumb {
+          background: #404040;
+          border-radius: 3px;
+        }
+        
+        .node-editor-form {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+        
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        
+        .form-group label {
+          color: #d4d4d4;
+          font-size: 13px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        
+        .form-group label .required {
+          color: #ef4444;
+        }
+        
+        .form-group label .type-hint {
+          color: #525252;
+          font-weight: 400;
+          font-size: 11px;
+        }
+        
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group textarea,
+        .form-group select {
+          background: #0a0a0a;
+          border: 1px solid #303030;
+          border-radius: 8px;
+          padding: 12px 14px;
+          color: #f5f5f5;
+          font-size: 14px;
+          font-family: 'JetBrains Mono', monospace;
+          transition: all 0.2s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+          outline: none;
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        
+        .form-group textarea {
+          min-height: 80px;
+          resize: vertical;
+        }
+        
+        .form-group input[type="checkbox"] {
+          width: 20px;
+          height: 20px;
+          cursor: pointer;
+        }
+        
+        .form-group .checkbox-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-direction: row;
+        }
+        
+        .form-group .checkbox-row label {
+          margin: 0;
+        }
+        
+        .form-group .field-description {
+          color: #525252;
+          font-size: 12px;
+          margin-top: -4px;
+        }
+        
+        .form-group select {
+          cursor: pointer;
+          appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 12px center;
+          padding-right: 40px;
+        }
+        
+        .form-section-title {
+          color: #a3a3a3;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-top: 8px;
+          padding-bottom: 8px;
+          border-bottom: 1px solid #262626;
+        }
+        
+        .node-editor-footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 24px;
+          border-top: 1px solid #262626;
+          background: #0f0f0f;
+        }
+        
+        .node-editor-footer-left {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .btn-node-delete {
+          padding: 10px 16px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: transparent;
+          border: 1px solid #450a0a;
+          color: #ef4444;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-node-delete:hover {
+          background: #450a0a;
+        }
+        
+        .btn-node-duplicate {
+          padding: 10px 16px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: transparent;
+          border: 1px solid #303030;
+          color: #a3a3a3;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-node-duplicate:hover {
+          background: #262626;
+          color: #f5f5f5;
+        }
+        
+        .node-editor-footer-right {
+          display: flex;
+          gap: 12px;
+        }
+        
+        .btn-cancel {
+          padding: 10px 20px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          background: transparent;
+          border: 1px solid #303030;
+          color: #a3a3a3;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-cancel:hover {
+          background: #262626;
+          color: #f5f5f5;
+        }
+        
+        .btn-save-node {
+          padding: 10px 24px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          background: linear-gradient(135deg, #3b82f6, #2563eb);
+          border: none;
+          color: white;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-save-node:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+        
+        /* Selected node styling */
+        .workflow-node.selected {
+          border-color: #3b82f6 !important;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+        }
+        
+        .workflow-node:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        
+        /* Array input styling */
+        .array-input-container {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        
+        .array-input-row {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .array-input-row input {
+          flex: 1;
+        }
+        
+        .btn-array-remove {
+          width: 36px;
+          height: 36px;
+          border-radius: 6px;
+          background: #262626;
+          border: 1px solid #303030;
+          color: #ef4444;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .btn-array-add {
+          padding: 8px 12px;
+          border-radius: 6px;
+          background: #1a1a1a;
+          border: 1px dashed #404040;
+          color: #737373;
+          cursor: pointer;
+          font-size: 12px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-array-add:hover {
+          background: #262626;
+          border-color: #525252;
+          color: #a3a3a3;
+        }
       </style>
       
       <div class="remediation-container">
@@ -2461,6 +3247,34 @@ const dashboardHTML = `<!DOCTYPE html>
             </div>
           </div>
           <div style="display: flex; gap: 12px; align-items: center;">
+            <!-- Autonomous Mode Controls - Phase 5E -->
+            <div id="autonomousControls" style="display: flex; align-items: center; gap: 16px; margin-right: 16px; padding-right: 16px; border-right: 1px solid #262626;">
+              <!-- Autonomous Mode Toggle -->
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label class="toggle-switch" style="position: relative; width: 44px; height: 24px; cursor: pointer;">
+                  <input type="checkbox" id="autonomousModeToggle" onchange="toggleAutonomousMode()" style="opacity: 0; width: 0; height: 0;">
+                  <span style="position: absolute; inset: 0; background: #262626; border-radius: 24px; transition: 0.3s;"></span>
+                  <span id="toggleKnob" style="position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: #737373; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+                <span id="autonomousModeLabel" style="color: #737373; font-size: 12px; font-weight: 500;">Autonomous OFF</span>
+              </div>
+              
+              <!-- Kill Switch Button -->
+              <button id="killSwitchBtn" onclick="toggleKillSwitch()" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; background: #1a1a1a; border: 1px solid #262626; color: #737373; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.2s;">
+                <i data-lucide="shield-off" style="width: 14px; height: 14px;"></i>
+                <span>Kill Switch</span>
+              </button>
+              
+              <!-- Confidence Meter -->
+              <div style="display: flex; align-items: center; gap: 6px;" title="Average confidence for auto-remediation">
+                <i data-lucide="gauge" style="width: 14px; height: 14px; color: #525252;"></i>
+                <div style="width: 60px; height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden;">
+                  <div id="confidenceBar" style="width: 85%; height: 100%; background: linear-gradient(90deg, #10b981, #3b82f6); border-radius: 3px; transition: width 0.5s;"></div>
+                </div>
+                <span id="confidenceScore" style="color: #a3a3a3; font-size: 11px; font-weight: 600; min-width: 32px;">85%</span>
+              </div>
+            </div>
+            
             <div class="ai-badge">
               <i data-lucide="brain" style="width: 16px; height: 16px;"></i>
               <span>30 AI Templates</span>
@@ -2566,6 +3380,186 @@ const dashboardHTML = `<!DOCTYPE html>
             </div>
           </div>
         </div>
+        
+        <!-- ======================================
+             VISUAL WORKFLOW CANVAS - Phase 5B
+             ====================================== -->
+        <div id="workflowCanvasContainer" class="workflow-canvas-container" style="display: none;">
+          <div class="workflow-canvas-header">
+            <div class="workflow-canvas-title">
+              <i data-lucide="workflow" style="width: 20px; height: 20px;"></i>
+              <span id="workflowCanvasName">Workflow Name</span>
+              <span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 500;">Visual Editor</span>
+            </div>
+            <div class="workflow-canvas-actions">
+              <button class="btn btn-sm" onclick="cloneWorkflow()" style="display: flex; align-items: center; gap: 6px;">
+                <i data-lucide="copy" class="lucide-sm"></i>
+                <span>Clone to Custom</span>
+              </button>
+              <button class="btn btn-sm btn-outline" onclick="executeWorkflow()" style="display: flex; align-items: center; gap: 6px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.1)); border-color: rgba(16, 185, 129, 0.3); color: #34d399;">
+                <i data-lucide="play-circle" class="lucide-sm"></i>
+                <span>Execute</span>
+              </button>
+              <button class="btn btn-sm btn-outline" onclick="closeWorkflowCanvas()" style="display: flex; align-items: center; gap: 6px;">
+                <i data-lucide="x" class="lucide-sm"></i>
+              </button>
+            </div>
+          </div>
+          <div class="workflow-canvas-body">
+            <!-- Node Palette Sidebar -->
+            <div class="node-palette" id="nodePalette">
+              <div class="node-palette-section">
+                <div class="node-palette-title">Triggers</div>
+                <div class="node-palette-item" draggable="true" data-node-type="alert_trigger">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #ef4444, #dc2626);"><i data-lucide="bell-ring" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Alert Trigger</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="schedule_trigger">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #ef4444, #dc2626);"><i data-lucide="clock" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Schedule</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="manual_trigger">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #ef4444, #dc2626);"><i data-lucide="hand" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Manual</span>
+                </div>
+              </div>
+              <div class="node-palette-section">
+                <div class="node-palette-title">Actions</div>
+                <div class="node-palette-item" draggable="true" data-node-type="shell_command">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);"><i data-lucide="terminal" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Shell Command</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="ansible_playbook">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);"><i data-lucide="cog" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Ansible</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="docker_action">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);"><i data-lucide="box" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Docker</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="kubernetes_action">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);"><i data-lucide="cloud" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Kubernetes</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="service_action">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);"><i data-lucide="server" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Service</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="api_request">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #3b82f6, #2563eb);"><i data-lucide="globe" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">API Request</span>
+                </div>
+              </div>
+              <div class="node-palette-section">
+                <div class="node-palette-title">Logic</div>
+                <div class="node-palette-item" draggable="true" data-node-type="metric_check">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);"><i data-lucide="activity" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Metric Check</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="condition">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);"><i data-lucide="git-branch" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Condition</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="delay">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);"><i data-lucide="timer" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Delay</span>
+                </div>
+              </div>
+              <div class="node-palette-section">
+                <div class="node-palette-title">Notifications</div>
+                <div class="node-palette-item" draggable="true" data-node-type="slack_notify">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #10b981, #059669);"><i data-lucide="message-square" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Slack</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="email_notify">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #10b981, #059669);"><i data-lucide="mail" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Email</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="log_entry">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #10b981, #059669);"><i data-lucide="file-text" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Log Entry</span>
+                </div>
+              </div>
+              <div class="node-palette-section">
+                <div class="node-palette-title">Safety</div>
+                <div class="node-palette-item" draggable="true" data-node-type="human_approval">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);"><i data-lucide="user-check" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Approval</span>
+                </div>
+                <div class="node-palette-item" draggable="true" data-node-type="rollback_checkpoint">
+                  <div class="node-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);"><i data-lucide="history" style="width: 14px; height: 14px; color: white;"></i></div>
+                  <span class="node-name">Checkpoint</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Main Workflow Canvas -->
+            <div class="workflow-canvas" id="workflowCanvas">
+              <svg class="workflow-edges" id="workflowEdges"></svg>
+              <div class="workflow-canvas-inner" id="workflowCanvasInner">
+                <!-- Nodes will be rendered here -->
+              </div>
+            </div>
+            
+            <!-- Execution Log Panel -->
+            <div class="execution-log" id="executionLog" style="display: none;">
+              <div class="execution-log-title">
+                <i data-lucide="scroll-text" class="lucide-sm"></i>
+                Execution Log
+              </div>
+              <div id="executionLogEntries">
+                <!-- Log entries will appear here -->
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- ======================================
+             NODE PROPERTY EDITOR MODAL - Phase 5D
+             ====================================== -->
+        <div id="nodeEditorOverlay" class="node-editor-overlay" onclick="if(event.target === this) closeNodeEditor()">
+          <div class="node-editor-modal">
+            <div class="node-editor-header">
+              <div class="node-editor-header-left">
+                <div id="nodeEditorIcon" class="node-editor-icon action">
+                  <i data-lucide="terminal" style="width: 24px; height: 24px;"></i>
+                </div>
+                <div class="node-editor-title-group">
+                  <h3 id="nodeEditorTitle">Shell Command</h3>
+                  <p id="nodeEditorDescription">Execute a shell/bash command on the target host</p>
+                </div>
+              </div>
+              <button class="node-editor-close" onclick="closeNodeEditor()">
+                <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+              </button>
+            </div>
+            <div class="node-editor-body">
+              <form id="nodeEditorForm" class="node-editor-form">
+                <!-- Form fields will be dynamically generated here -->
+              </form>
+            </div>
+            <div class="node-editor-footer">
+              <div class="node-editor-footer-left">
+                <button type="button" class="btn-node-delete" onclick="deleteCurrentNode()">
+                  <i data-lucide="trash-2" class="lucide-sm"></i>
+                  <span>Delete</span>
+                </button>
+                <button type="button" class="btn-node-duplicate" onclick="duplicateCurrentNode()">
+                  <i data-lucide="copy" class="lucide-sm"></i>
+                  <span>Duplicate</span>
+                </button>
+              </div>
+              <div class="node-editor-footer-right">
+                <button type="button" class="btn-cancel" onclick="closeNodeEditor()">Cancel</button>
+                <button type="button" class="btn-save-node" onclick="saveNodeChanges()">
+                  <i data-lucide="check" class="lucide-sm"></i>
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
       </div>
     </div><!-- End view-remediation -->
 
@@ -3393,6 +4387,177 @@ const dashboardHTML = `<!DOCTYPE html>
       }
     }
     
+    // ==========================================
+    // PHASE 5E: AUTONOMOUS MODE CONTROLS
+    // ==========================================
+    
+    let autonomousState = {
+      enabled: false,
+      killSwitch: false,
+      confidence: 85
+    };
+    
+    async function loadAutonomousStatus() {
+      try {
+        const res = await fetch(WORKFLOW_ENGINE_URL + '/api/autonomous/status');
+        const data = await res.json();
+        
+        autonomousState.enabled = data.autonomous_mode_enabled;
+        autonomousState.killSwitch = data.safety?.kill_switch?.enabled || false;
+        
+        updateAutonomousUI();
+      } catch (error) {
+        console.log('Autonomous mode status unavailable');
+      }
+    }
+    
+    function updateAutonomousUI() {
+      const toggle = document.getElementById('autonomousModeToggle');
+      const knob = document.getElementById('toggleKnob');
+      const label = document.getElementById('autonomousModeLabel');
+      const killBtn = document.getElementById('killSwitchBtn');
+      const parent = toggle?.parentElement;
+      
+      if (toggle) {
+        toggle.checked = autonomousState.enabled;
+        
+        // Update toggle visual
+        if (autonomousState.enabled) {
+          if (knob) {
+            knob.style.transform = 'translateX(20px)';
+            knob.style.background = '#10b981';
+          }
+          if (parent) {
+            parent.querySelector('span')!.style.background = 'rgba(16, 185, 129, 0.3)';
+          }
+          if (label) {
+            label.textContent = 'Autonomous ON';
+            label.style.color = '#10b981';
+          }
+        } else {
+          if (knob) {
+            knob.style.transform = 'translateX(0)';
+            knob.style.background = '#737373';
+          }
+          if (parent) {
+            const bg = parent.querySelector('span');
+            if (bg) bg.style.background = '#262626';
+          }
+          if (label) {
+            label.textContent = 'Autonomous OFF';
+            label.style.color = '#737373';
+          }
+        }
+      }
+      
+      // Update kill switch button
+      if (killBtn) {
+        if (autonomousState.killSwitch) {
+          killBtn.style.background = '#450a0a';
+          killBtn.style.borderColor = '#7f1d1d';
+          killBtn.style.color = '#ef4444';
+          killBtn.innerHTML = '<i data-lucide="shield-alert" style="width: 14px; height: 14px;"></i><span>ACTIVE</span>';
+        } else {
+          killBtn.style.background = '#1a1a1a';
+          killBtn.style.borderColor = '#262626';
+          killBtn.style.color = '#737373';
+          killBtn.innerHTML = '<i data-lucide="shield-off" style="width: 14px; height: 14px;"></i><span>Kill Switch</span>';
+        }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }
+    }
+    
+    async function toggleAutonomousMode() {
+      const toggle = document.getElementById('autonomousModeToggle');
+      const newState = toggle?.checked;
+      
+      try {
+        const endpoint = newState ? '/api/autonomous/enable' : '/api/autonomous/disable';
+        const res = await fetch(WORKFLOW_ENGINE_URL + endpoint, { method: 'POST' });
+        const data = await res.json();
+        
+        autonomousState.enabled = data.status?.autonomous_mode_enabled ?? newState;
+        updateAutonomousUI();
+        
+        showToast(
+          newState ? '🤖 Autonomous mode enabled' : '🛑 Autonomous mode disabled',
+          newState ? 'success' : 'info'
+        );
+      } catch (error) {
+        console.error('Failed to toggle autonomous mode:', error);
+        showToast('Failed to toggle autonomous mode', 'error');
+        // Revert UI
+        if (toggle) toggle.checked = !newState;
+      }
+    }
+    
+    async function toggleKillSwitch() {
+      const enable = !autonomousState.killSwitch;
+      
+      if (enable && !confirm('⚠️ EMERGENCY KILL SWITCH\\n\\nThis will IMMEDIATELY HALT all autonomous remediations.\\n\\nAre you sure?')) {
+        return;
+      }
+      
+      try {
+        const res = await fetch(WORKFLOW_ENGINE_URL + '/api/autonomous/kill-switch?enable=' + enable + '&reason=Manual%20UI%20activation', {
+          method: 'POST'
+        });
+        const data = await res.json();
+        
+        autonomousState.killSwitch = data.kill_switch === 'enabled';
+        updateAutonomousUI();
+        
+        showToast(
+          enable ? '🚨 KILL SWITCH ACTIVATED - All autonomous operations halted' : '✅ Kill switch deactivated',
+          enable ? 'error' : 'success'
+        );
+      } catch (error) {
+        console.error('Failed to toggle kill switch:', error);
+        showToast('Failed to toggle kill switch', 'error');
+      }
+    }
+    
+    async function calculateConfidence(workflowId) {
+      try {
+        const res = await fetch(WORKFLOW_ENGINE_URL + '/api/autonomous/confidence/' + workflowId + '?issue_title=Test&host=server-01');
+        const data = await res.json();
+        
+        // Update confidence gauge
+        const bar = document.getElementById('confidenceBar');
+        const score = document.getElementById('confidenceScore');
+        
+        if (bar) {
+          bar.style.width = data.confidence_score + '%';
+          // Color based on level
+          if (data.confidence_level === 'high') {
+            bar.style.background = 'linear-gradient(90deg, #10b981, #059669)';
+          } else if (data.confidence_level === 'medium') {
+            bar.style.background = 'linear-gradient(90deg, #f59e0b, #d97706)';
+          } else {
+            bar.style.background = 'linear-gradient(90deg, #ef4444, #dc2626)';
+          }
+        }
+        
+        if (score) {
+          score.textContent = data.confidence_score + '%';
+        }
+        
+        return data;
+      } catch (error) {
+        console.log('Confidence calculation unavailable');
+        return { confidence_score: 0, confidence_level: 'unknown' };
+      }
+    }
+    
+    // Load autonomous status when remediation view is shown
+    const originalShowView = showView;
+    showView = function(viewId) {
+      originalShowView(viewId);
+      if (viewId === 'remediation') {
+        loadAutonomousStatus();
+      }
+    };
+    
     function renderRemediationStats() {
       // Count issues by severity
       const critical = remediationData.issues.filter(i => i.severity === 'P0_CRITICAL').length;
@@ -3611,12 +4776,27 @@ const dashboardHTML = `<!DOCTYPE html>
         'security': 'shield',
         'container': 'box',
         'compliance': 'clipboard-check',
-        'business': 'wallet'
+        'business': 'wallet',
+        'database': 'database'
+      };
+      
+      // Map old template IDs to new workflow IDs
+      const templateToWorkflowMap = {
+        'memory_cleanup': 'wf_memory_cleanup',
+        'cpu_optimization': 'wf_cpu_spike',
+        'disk_cleanup': 'wf_disk_cleanup',
+        'service_restart': 'wf_service_restart',
+        'container_restart': 'wf_container_restart',
+        'db_connection_reset': 'wf_db_pool_reset',
+        'network_fix': 'wf_network_fix',
+        'ssl_renewal': 'wf_ssl_renewal',
+        'k8s_pod_restart': 'wf_k8s_pod_restart',
+        'log_rotation': 'wf_log_rotation'
       };
       
       container.innerHTML = templates.slice(0, 12).map(template => \`
-        <div class="template-card" onclick="showTemplateDetails('\${template.id}')">
-          <div class="template-header">
+        <div class="template-card">
+          <div class="template-header" onclick="showTemplateDetails('\${template.id}')">
             <div class="template-icon"><i data-lucide="\${templateIconMap[template.category] || 'wrench'}" style="width: 20px; height: 20px;"></i></div>
             <div>
               <div class="template-title">\${template.name}</div>
@@ -3633,14 +4813,884 @@ const dashboardHTML = `<!DOCTYPE html>
               <span>\${template.estimated_fix_time}</span>
             </div>
             <div class="template-stat">
-              <i data-lucide="list" class="lucide-sm"></i>
-              <span>\${template.step_count} steps</span>
+              <i data-lucide="git-branch" class="lucide-sm"></i>
+              <span>\${template.step_count} nodes</span>
             </div>
+          </div>
+          <div class="template-card-actions">
+            <button class="btn-view-flow" onclick="event.stopPropagation(); openWorkflowCanvas('\${templateToWorkflowMap[template.id] || template.id}', '\${template.name}')">
+              <i data-lucide="workflow" class="lucide-sm"></i>
+              <span>View Flow</span>
+            </button>
+            <button class="btn-run-template" onclick="event.stopPropagation(); runTemplateWorkflow('\${templateToWorkflowMap[template.id] || template.id}')">
+              <i data-lucide="play" class="lucide-sm"></i>
+              <span>Run</span>
+            </button>
           </div>
         </div>
       \`).join('');
       // Re-initialize Lucide icons for dynamic content
       if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+    
+    // ==========================================
+    // VISUAL WORKFLOW CANVAS - Phase 5B
+    // ==========================================
+    
+    let currentWorkflow = null;
+    let currentWorkflowId = null;
+    
+    // Node type metadata for rendering
+    const nodeTypeMetadata = {
+      // Triggers
+      'alert_trigger': { name: 'Alert Trigger', icon: 'bell-ring', category: 'trigger' },
+      'schedule_trigger': { name: 'Schedule', icon: 'clock', category: 'trigger' },
+      'webhook_trigger': { name: 'Webhook', icon: 'webhook', category: 'trigger' },
+      'manual_trigger': { name: 'Manual', icon: 'hand', category: 'trigger' },
+      // Actions
+      'shell_command': { name: 'Shell Command', icon: 'terminal', category: 'action' },
+      'ansible_playbook': { name: 'Ansible', icon: 'cog', category: 'action' },
+      'docker_action': { name: 'Docker', icon: 'box', category: 'action' },
+      'kubernetes_action': { name: 'Kubernetes', icon: 'cloud', category: 'action' },
+      'api_request': { name: 'API Request', icon: 'globe', category: 'action' },
+      'database_query': { name: 'Database', icon: 'database', category: 'action' },
+      'service_action': { name: 'Service', icon: 'server', category: 'action' },
+      // Logic
+      'metric_check': { name: 'Metric Check', icon: 'activity', category: 'logic' },
+      'condition': { name: 'Condition', icon: 'git-branch', category: 'logic' },
+      'delay': { name: 'Delay', icon: 'timer', category: 'logic' },
+      'loop': { name: 'Loop', icon: 'repeat', category: 'logic' },
+      'parallel': { name: 'Parallel', icon: 'git-merge', category: 'logic' },
+      // Notifications
+      'slack_notify': { name: 'Slack', icon: 'message-square', category: 'notification' },
+      'email_notify': { name: 'Email', icon: 'mail', category: 'notification' },
+      'pagerduty_alert': { name: 'PagerDuty', icon: 'phone', category: 'notification' },
+      'webhook_output': { name: 'Webhook Out', icon: 'send', category: 'notification' },
+      'log_entry': { name: 'Log Entry', icon: 'file-text', category: 'notification' },
+      // Safety
+      'human_approval': { name: 'Approval', icon: 'user-check', category: 'safety' },
+      'rollback_checkpoint': { name: 'Checkpoint', icon: 'history', category: 'safety' },
+      'confidence_gate': { name: 'Confidence', icon: 'shield-check', category: 'safety' }
+    };
+    
+    async function openWorkflowCanvas(workflowId, workflowName) {
+      console.log('Opening workflow canvas for:', workflowId);
+      currentWorkflowId = workflowId;
+      
+      // Show the canvas container
+      const container = document.getElementById('workflowCanvasContainer');
+      container.style.display = 'block';
+      container.classList.add('expanded');
+      document.getElementById('workflowCanvasName').textContent = workflowName;
+      
+      // Scroll to the canvas
+      container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      
+      try {
+        // Fetch the workflow from the API
+        const response = await fetch(WORKFLOW_ENGINE_URL + '/api/remediation-workflows/' + workflowId);
+        if (!response.ok) {
+          throw new Error('Workflow not found');
+        }
+        currentWorkflow = await response.json();
+        
+        // Render the workflow
+        renderWorkflow(currentWorkflow);
+        
+      } catch (error) {
+        console.error('Failed to load workflow:', error);
+        // Show error in canvas
+        const inner = document.getElementById('workflowCanvasInner');
+        inner.innerHTML = \`
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #737373;">
+            <i data-lucide="alert-circle" style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.5;"></i>
+            <div style="font-size: 16px; margin-bottom: 8px;">Workflow Not Found</div>
+            <div style="font-size: 12px;">ID: \${workflowId}</div>
+            <div style="font-size: 11px; margin-top: 8px; color: #525252;">This template may not have a visual workflow yet</div>
+          </div>
+        \`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }
+    }
+    
+    function renderWorkflow(workflow) {
+      console.log('Rendering workflow:', workflow.name, workflow.nodes?.length, 'nodes');
+      
+      // Render nodes
+      renderWorkflowNodes(workflow.nodes || []);
+      
+      // Render edges (after a small delay to ensure nodes are positioned)
+      setTimeout(() => {
+        renderWorkflowEdges(workflow.edges || [], workflow.nodes || []);
+      }, 100);
+      
+      // Re-initialize Lucide icons
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+    
+    function renderWorkflowNodes(nodes) {
+      const container = document.getElementById('workflowCanvasInner');
+      
+      if (!nodes || nodes.length === 0) {
+        container.innerHTML = \`
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #737373;">
+            <i data-lucide="workflow" style="width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
+            <div>No nodes in this workflow</div>
+            <div style="font-size: 12px; margin-top: 8px;">Drag nodes from the palette to start building</div>
+          </div>
+        \`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        return;
+      }
+      
+      // Clear existing nodes
+      container.innerHTML = '';
+      
+      // Render each node
+      nodes.forEach((node, index) => {
+        const meta = nodeTypeMetadata[node.type] || { name: node.type, icon: 'box', category: 'action' };
+        const x = node.position?.x || (100 + (index % 3) * 250);
+        const y = node.position?.y || (50 + Math.floor(index / 3) * 120);
+        
+        // Get config preview
+        let configPreview = '';
+        if (node.data) {
+          if (node.data.command) {
+            const cmd = node.data.command.length > 35 ? node.data.command.substring(0, 35) + '...' : node.data.command;
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="terminal" style="width: 10px; height: 10px;"></i> \${cmd}</div>\`;
+          } else if (node.data.pattern) {
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="search" style="width: 10px; height: 10px;"></i> \${node.data.pattern}</div>\`;
+          } else if (node.data.metric) {
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="activity" style="width: 10px; height: 10px;"></i> \${node.data.metric} \${node.data.operator || '>'} \${node.data.threshold || ''}</div>\`;
+          } else if (node.data.channel) {
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="message-square" style="width: 10px; height: 10px;"></i> \${node.data.channel}</div>\`;
+          } else if (node.data.duration_seconds) {
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="timer" style="width: 10px; height: 10px;"></i> \${node.data.duration_seconds}s</div>\`;
+          } else if (node.data.action) {
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="play" style="width: 10px; height: 10px;"></i> \${node.data.action}</div>\`;
+          } else if (node.data.service_name) {
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="server" style="width: 10px; height: 10px;"></i> \${node.data.service_name}</div>\`;
+          } else if (node.data.message) {
+            const msg = node.data.message.length > 30 ? node.data.message.substring(0, 30) + '...' : node.data.message;
+            configPreview = \`<div class="workflow-node-config-item"><i data-lucide="file-text" style="width: 10px; height: 10px;"></i> \${msg}</div>\`;
+          }
+        }
+        
+        // Determine if node has multiple outputs (for branching)
+        const hasMultipleOutputs = ['metric_check', 'condition', 'human_approval', 'confidence_gate'].includes(node.type);
+        
+        const nodeEl = document.createElement('div');
+        nodeEl.className = 'workflow-node';
+        nodeEl.id = 'node-' + node.id;
+        nodeEl.style.left = x + 'px';
+        nodeEl.style.top = y + 'px';
+        nodeEl.setAttribute('data-node-id', node.id);
+        
+        nodeEl.innerHTML = \`
+          <div class="workflow-node-header \${meta.category}">
+            <i data-lucide="\${meta.icon}" style="width: 16px; height: 16px;"></i>
+            <span>\${meta.name}</span>
+          </div>
+          <div class="workflow-node-body">
+            <div class="workflow-node-config">
+              \${configPreview || '<span style="color:#525252;font-size:10px;">Click to configure</span>'}
+            </div>
+          </div>
+          \${meta.category !== 'trigger' ? '<div class="node-connector input"></div>' : ''}
+          \${hasMultipleOutputs ? \`
+            <div class="node-connector output-true" title="True/Yes path"></div>
+            <div class="node-connector output-false" title="False/No path"></div>
+          \` : \`
+            <div class="node-connector output"></div>
+          \`}
+        \`;
+        
+        // Add click handler for node editor
+        nodeEl.style.cursor = 'pointer';
+        nodeEl.addEventListener('click', (e) => handleNodeClick(node.id, e));
+        
+        container.appendChild(nodeEl);
+      });
+      
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+    
+    function renderWorkflowEdges(edges, nodes) {
+      const svg = document.getElementById('workflowEdges');
+      if (!svg) return;
+      
+      // Clear existing edges
+      svg.innerHTML = '';
+      
+      // Create node position lookup
+      const nodePositions = {};
+      nodes.forEach(node => {
+        const el = document.getElementById('node-' + node.id);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const container = document.getElementById('workflowCanvas');
+          const containerRect = container.getBoundingClientRect();
+          nodePositions[node.id] = {
+            x: node.position?.x || 0,
+            y: node.position?.y || 0,
+            width: el.offsetWidth,
+            height: el.offsetHeight
+          };
+        } else {
+          nodePositions[node.id] = {
+            x: node.position?.x || 0,
+            y: node.position?.y || 0,
+            width: 180,
+            height: 80
+          };
+        }
+      });
+      
+      // Render each edge as a bezier curve
+      edges.forEach(edge => {
+        const source = nodePositions[edge.source];
+        const target = nodePositions[edge.target];
+        
+        if (!source || !target) return;
+        
+        // Calculate connection points
+        const sourceX = source.x + source.width + 40; // Right side of source + padding
+        let sourceY = source.y + source.height / 2 + 40; // Center of source + padding
+        const targetX = source.x < target.x ? target.x + 40 : target.x + target.width + 40; // Left or right of target
+        const targetY = target.y + target.height / 2 + 40; // Center of target
+        
+        // Adjust for branch handles
+        if (edge.source_handle === 'true') {
+          sourceY = source.y + source.height * 0.35 + 40;
+        } else if (edge.source_handle === 'false') {
+          sourceY = source.y + source.height * 0.65 + 40;
+        }
+        
+        // Create bezier path
+        const midX = (sourceX + targetX) / 2;
+        const path = \`M \${sourceX} \${sourceY} C \${midX} \${sourceY}, \${midX} \${targetY}, \${targetX} \${targetY}\`;
+        
+        const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        pathEl.setAttribute('d', path);
+        pathEl.setAttribute('class', 'workflow-edge');
+        pathEl.setAttribute('data-edge-id', edge.id);
+        
+        svg.appendChild(pathEl);
+        
+        // Add label if present
+        if (edge.label) {
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', midX);
+          text.setAttribute('y', (sourceY + targetY) / 2 - 8);
+          text.setAttribute('class', 'edge-label');
+          text.setAttribute('text-anchor', 'middle');
+          text.textContent = edge.label;
+          svg.appendChild(text);
+        }
+      });
+    }
+    
+    function closeWorkflowCanvas() {
+      const container = document.getElementById('workflowCanvasContainer');
+      container.classList.remove('expanded');
+      container.style.display = 'none';
+      currentWorkflow = null;
+      currentWorkflowId = null;
+    }
+    
+    async function cloneWorkflow() {
+      if (!currentWorkflowId) return;
+      
+      try {
+        const response = await fetch(WORKFLOW_ENGINE_URL + '/api/remediation-workflows/' + currentWorkflowId + '/clone', {
+          method: 'POST'
+        });
+        const cloned = await response.json();
+        
+        showToast(\`Workflow cloned as "\${cloned.name}"\`, 'success');
+        
+        // Open the cloned workflow
+        openWorkflowCanvas(cloned.id, cloned.name);
+        
+      } catch (error) {
+        console.error('Clone failed:', error);
+        showToast('Failed to clone workflow', 'error');
+      }
+    }
+    
+    async function executeWorkflow() {
+      if (!currentWorkflow || !currentWorkflowId) return;
+      
+      // Show execution log panel
+      document.getElementById('executionLog').style.display = 'block';
+      const logEntries = document.getElementById('executionLogEntries');
+      logEntries.innerHTML = '<div style="color: #737373; font-size: 11px; padding: 8px 0;">Starting execution...</div>';
+      
+      // Reset node statuses
+      const nodes = currentWorkflow.nodes || [];
+      nodes.forEach(node => {
+        const nodeEl = document.getElementById('node-' + node.id);
+        if (nodeEl) {
+          nodeEl.classList.remove('status-running', 'status-success', 'status-failed', 'status-skipped');
+          nodeEl.classList.add('status-pending');
+        }
+      });
+      
+      try {
+        // Call real execution API
+        const response = await fetch(WORKFLOW_ENGINE_URL + '/api/remediation-workflows/' + currentWorkflowId + '/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger_data: {}, dry_run: false })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Execution failed: ' + response.statusText);
+        }
+        
+        const result = await response.json();
+        console.log('Execution result:', result);
+        
+        // Update UI with results
+        logEntries.innerHTML = '';
+        
+        for (const [nodeId, nodeResult] of Object.entries(result.node_results || {})) {
+          const node = nodes.find(n => n.id === nodeId);
+          const meta = node ? (nodeTypeMetadata[node.type] || { name: node.type }) : { name: nodeId };
+          
+          // Update node visual status
+          const nodeEl = document.getElementById('node-' + nodeId);
+          if (nodeEl) {
+            nodeEl.classList.remove('status-pending', 'status-running');
+            nodeEl.classList.add('status-' + nodeResult.status);
+          }
+          
+          // Add log entry
+          logEntries.innerHTML += \`
+            <div class="execution-log-entry">
+              <div class="status-dot \${nodeResult.status}"></div>
+              <div>
+                <div class="node-name">\${meta.name}</div>
+                <div class="node-time">\${nodeResult.duration_ms}ms</div>
+                \${nodeResult.output ? \`<div style="color: #525252; font-size: 10px; margin-top: 4px; font-family: monospace;">\${nodeResult.output.substring(0, 80)}\${nodeResult.output.length > 80 ? '...' : ''}</div>\` : ''}
+                \${nodeResult.error ? \`<div style="color: #ef4444; font-size: 10px; margin-top: 4px;">\${nodeResult.error}</div>\` : ''}
+              </div>
+            </div>
+          \`;
+        }
+        
+        if (result.status === 'completed') {
+          showToast(\`Workflow executed successfully! (\${result.duration_ms}ms)\`, 'success');
+        } else if (result.status === 'failed') {
+          showToast(\`Workflow failed: \${result.error || 'Unknown error'}\`, 'error');
+        }
+        
+      } catch (error) {
+        console.error('Execution error:', error);
+        logEntries.innerHTML = \`<div style="color: #ef4444; padding: 8px 0;">\${error.message}</div>\`;
+        showToast('Workflow execution failed', 'error');
+      }
+      
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+    
+    async function runTemplateWorkflow(workflowId) {
+      // Quick run without opening the canvas
+      try {
+        showToast('Starting workflow execution...', 'info');
+        
+        const response = await fetch(WORKFLOW_ENGINE_URL + '/api/remediation-workflows/' + workflowId + '/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trigger_data: {}, dry_run: false })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Execution failed');
+        }
+        
+        const result = await response.json();
+        
+        if (result.status === 'completed') {
+          showToast(\`Workflow completed in \${result.duration_ms}ms!\`, 'success');
+        } else {
+          showToast(\`Workflow \${result.status}: \${result.error || ''}\`, result.status === 'failed' ? 'error' : 'warning');
+        }
+        
+      } catch (error) {
+        console.error('Execution error:', error);
+        showToast('Workflow execution failed: ' + error.message, 'error');
+      }
+    }
+    
+    // ===========================================
+    // NODE PROPERTY EDITOR - Phase 5D
+    // ===========================================
+    
+    let selectedNodeId = null;
+    let selectedNodeData = null;
+    
+    // Node type schemas for form generation
+    const nodeTypeSchemas = {
+      // TRIGGERS
+      alert_trigger: {
+        name: 'Alert Trigger',
+        description: 'Triggers workflow when a matching alert is detected',
+        category: 'trigger',
+        icon: 'bell-ring',
+        properties: {
+          pattern: { type: 'string', label: 'Alert Pattern', description: 'Pattern to match (wildcards supported)', required: true, placeholder: 'High Memory*' },
+          severity: { type: 'select_multiple', label: 'Severity Levels', options: ['critical', 'high', 'medium', 'low'], default: ['critical', 'high'] },
+          hosts: { type: 'array', label: 'Target Hosts', description: 'Specific hosts to match (optional)' }
+        }
+      },
+      schedule_trigger: {
+        name: 'Schedule Trigger',
+        description: 'Triggers workflow on a time-based schedule',
+        category: 'trigger',
+        icon: 'clock',
+        properties: {
+          cron: { type: 'string', label: 'Cron Expression', description: 'e.g., 0 * * * * for hourly', required: true, placeholder: '0 * * * *' },
+          timezone: { type: 'string', label: 'Timezone', default: 'UTC' }
+        }
+      },
+      manual_trigger: {
+        name: 'Manual Trigger',
+        description: 'Workflow is triggered manually by a user',
+        category: 'trigger',
+        icon: 'hand',
+        properties: {
+          require_confirmation: { type: 'boolean', label: 'Require Confirmation', default: true },
+          allowed_roles: { type: 'array', label: 'Allowed Roles' }
+        }
+      },
+      webhook_trigger: {
+        name: 'Webhook Trigger',
+        description: 'Triggers workflow from external HTTP request',
+        category: 'trigger',
+        icon: 'webhook',
+        properties: {
+          path: { type: 'string', label: 'Webhook Path', required: true, placeholder: '/webhook/my-workflow' },
+          method: { type: 'select', label: 'HTTP Method', options: ['POST', 'PUT'], default: 'POST' },
+          auth_required: { type: 'boolean', label: 'Require Auth', default: true }
+        }
+      },
+      
+      // ACTIONS
+      shell_command: {
+        name: 'Shell Command',
+        description: 'Execute a shell/bash command on the target host',
+        category: 'action',
+        icon: 'terminal',
+        properties: {
+          command: { type: 'textarea', label: 'Command', description: 'Shell command to execute', required: true, placeholder: 'echo "Hello World"' },
+          working_dir: { type: 'string', label: 'Working Directory', default: '/tmp' },
+          timeout_seconds: { type: 'number', label: 'Timeout (seconds)', default: 60, min: 1, max: 3600 },
+          retry_count: { type: 'number', label: 'Retry Count', default: 0, min: 0, max: 5 },
+          continue_on_failure: { type: 'boolean', label: 'Continue on Failure', default: false }
+        }
+      },
+      docker_action: {
+        name: 'Docker Action',
+        description: 'Perform Docker container operations',
+        category: 'action',
+        icon: 'box',
+        properties: {
+          action: { type: 'select', label: 'Action', options: ['restart', 'stop', 'start', 'kill', 'remove', 'scale'], required: true },
+          container: { type: 'string', label: 'Container Name/ID', required: true, placeholder: 'my-container' },
+          scale_count: { type: 'number', label: 'Scale Count', description: 'For scale action only', min: 1 },
+          force: { type: 'boolean', label: 'Force', default: false }
+        }
+      },
+      kubernetes_action: {
+        name: 'Kubernetes Action',
+        description: 'Perform Kubernetes cluster operations',
+        category: 'action',
+        icon: 'cloud',
+        properties: {
+          action: { type: 'select', label: 'Action', options: ['rollout_restart', 'scale', 'delete_pod', 'apply', 'patch'], required: true },
+          resource_type: { type: 'select', label: 'Resource Type', options: ['deployment', 'statefulset', 'daemonset', 'pod', 'service'], required: true },
+          resource_name: { type: 'string', label: 'Resource Name', required: true },
+          namespace: { type: 'string', label: 'Namespace', default: 'default' },
+          replicas: { type: 'number', label: 'Replicas', description: 'For scale action' }
+        }
+      },
+      service_action: {
+        name: 'Service Action',
+        description: 'Manage system services (systemd/init)',
+        category: 'action',
+        icon: 'server',
+        properties: {
+          action: { type: 'select', label: 'Action', options: ['restart', 'start', 'stop', 'reload', 'status'], required: true },
+          service_name: { type: 'string', label: 'Service Name', required: true, placeholder: 'nginx' }
+        }
+      },
+      api_request: {
+        name: 'API Request',
+        description: 'Make an HTTP API request',
+        category: 'action',
+        icon: 'globe',
+        properties: {
+          url: { type: 'string', label: 'URL', required: true, placeholder: 'https://api.example.com/endpoint' },
+          method: { type: 'select', label: 'Method', options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], default: 'GET' },
+          timeout_seconds: { type: 'number', label: 'Timeout (seconds)', default: 30 }
+        }
+      },
+      
+      // LOGIC
+      metric_check: {
+        name: 'Metric Check',
+        description: 'Check a system metric against a threshold',
+        category: 'logic',
+        icon: 'activity',
+        properties: {
+          metric: { type: 'string', label: 'Metric Name', required: true, placeholder: 'system.ram' },
+          operator: { type: 'select', label: 'Operator', options: ['>', '<', '>=', '<=', '==', '!='], default: '>' },
+          threshold: { type: 'number', label: 'Threshold', required: true }
+        }
+      },
+      condition: {
+        name: 'Condition',
+        description: 'Branch workflow based on a condition',
+        category: 'logic',
+        icon: 'git-branch',
+        properties: {
+          expression: { type: 'string', label: 'Expression', required: true, placeholder: 'true' },
+          true_label: { type: 'string', label: 'True Branch Label', default: 'Yes' },
+          false_label: { type: 'string', label: 'False Branch Label', default: 'No' }
+        }
+      },
+      delay: {
+        name: 'Delay',
+        description: 'Wait for a specified duration before continuing',
+        category: 'logic',
+        icon: 'timer',
+        properties: {
+          duration_seconds: { type: 'number', label: 'Duration (seconds)', required: true, min: 1, max: 86400 },
+          reason: { type: 'string', label: 'Reason', description: 'Why are we waiting?' }
+        }
+      },
+      
+      // NOTIFICATIONS
+      slack_notify: {
+        name: 'Slack Notification',
+        description: 'Send a notification to Slack',
+        category: 'notification',
+        icon: 'message-square',
+        properties: {
+          channel: { type: 'string', label: 'Channel', required: true, placeholder: '#ops' },
+          message: { type: 'textarea', label: 'Message', required: true, placeholder: 'Alert on {{issue.host}}' },
+          include_details: { type: 'boolean', label: 'Include Details', default: true }
+        }
+      },
+      email_notify: {
+        name: 'Email Notification',
+        description: 'Send an email notification',
+        category: 'notification',
+        icon: 'mail',
+        properties: {
+          to: { type: 'array', label: 'Recipients', required: true },
+          subject: { type: 'string', label: 'Subject', required: true },
+          body: { type: 'textarea', label: 'Body' }
+        }
+      },
+      log_entry: {
+        name: 'Log Entry',
+        description: 'Write an entry to the audit log',
+        category: 'notification',
+        icon: 'file-text',
+        properties: {
+          message: { type: 'textarea', label: 'Message', required: true },
+          level: { type: 'select', label: 'Level', options: ['debug', 'info', 'warning', 'error'], default: 'info' }
+        }
+      },
+      
+      // SAFETY
+      human_approval: {
+        name: 'Human Approval',
+        description: 'Pause workflow and wait for human approval',
+        category: 'safety',
+        icon: 'user-check',
+        properties: {
+          message: { type: 'textarea', label: 'Approval Message', description: 'Message shown to approver' },
+          timeout_minutes: { type: 'number', label: 'Timeout (minutes)', default: 60 },
+          timeout_action: { type: 'select', label: 'On Timeout', options: ['approve', 'reject', 'escalate'], default: 'reject' }
+        }
+      },
+      rollback_checkpoint: {
+        name: 'Rollback Checkpoint',
+        description: 'Save current state for potential rollback',
+        category: 'safety',
+        icon: 'history',
+        properties: {
+          checkpoint_name: { type: 'string', label: 'Checkpoint Name', required: true },
+          auto_rollback_on_failure: { type: 'boolean', label: 'Auto-Rollback on Failure', default: true }
+        }
+      }
+    };
+    
+    function handleNodeClick(nodeId, event) {
+      event.stopPropagation();
+      
+      // Deselect previous
+      document.querySelectorAll('.workflow-node.selected').forEach(n => n.classList.remove('selected'));
+      
+      // Select new
+      selectedNodeId = nodeId;
+      const nodeEl = document.getElementById('node-' + nodeId);
+      if (nodeEl) {
+        nodeEl.classList.add('selected');
+      }
+      
+      // Find node data
+      if (currentWorkflow && currentWorkflow.nodes) {
+        selectedNodeData = currentWorkflow.nodes.find(n => n.id === nodeId);
+        if (selectedNodeData) {
+          openNodeEditor(selectedNodeData);
+        }
+      }
+    }
+    
+    function openNodeEditor(node) {
+      const schema = nodeTypeSchemas[node.type];
+      if (!schema) {
+        showToast('Unknown node type: ' + node.type, 'error');
+        return;
+      }
+      
+      // Update header
+      document.getElementById('nodeEditorTitle').textContent = schema.name;
+      document.getElementById('nodeEditorDescription').textContent = schema.description;
+      
+      // Update icon
+      const iconEl = document.getElementById('nodeEditorIcon');
+      iconEl.className = 'node-editor-icon ' + schema.category;
+      iconEl.innerHTML = \`<i data-lucide="\${schema.icon}" style="width: 24px; height: 24px;"></i>\`;
+      
+      // Generate form fields
+      generateFormFields(schema.properties, node.data || {});
+      
+      // Show modal
+      document.getElementById('nodeEditorOverlay').classList.add('active');
+      
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+    
+    function generateFormFields(properties, currentData) {
+      const form = document.getElementById('nodeEditorForm');
+      form.innerHTML = '';
+      
+      for (const [key, prop] of Object.entries(properties)) {
+        const value = currentData[key] !== undefined ? currentData[key] : prop.default;
+        
+        let fieldHtml = '';
+        
+        switch (prop.type) {
+          case 'string':
+            fieldHtml = \`
+              <div class="form-group">
+                <label>\${prop.label} \${prop.required ? '<span class="required">*</span>' : ''}</label>
+                <input type="text" name="\${key}" value="\${value || ''}" placeholder="\${prop.placeholder || ''}">
+                \${prop.description ? \`<div class="field-description">\${prop.description}</div>\` : ''}
+              </div>
+            \`;
+            break;
+            
+          case 'textarea':
+            fieldHtml = \`
+              <div class="form-group">
+                <label>\${prop.label} \${prop.required ? '<span class="required">*</span>' : ''}</label>
+                <textarea name="\${key}" placeholder="\${prop.placeholder || ''}">\${value || ''}</textarea>
+                \${prop.description ? \`<div class="field-description">\${prop.description}</div>\` : ''}
+              </div>
+            \`;
+            break;
+            
+          case 'number':
+            fieldHtml = \`
+              <div class="form-group">
+                <label>\${prop.label} \${prop.required ? '<span class="required">*</span>' : ''}</label>
+                <input type="number" name="\${key}" value="\${value || ''}" 
+                  \${prop.min !== undefined ? \`min="\${prop.min}"\` : ''}
+                  \${prop.max !== undefined ? \`max="\${prop.max}"\` : ''}>
+                \${prop.description ? \`<div class="field-description">\${prop.description}</div>\` : ''}
+              </div>
+            \`;
+            break;
+            
+          case 'boolean':
+            fieldHtml = \`
+              <div class="form-group">
+                <div class="checkbox-row">
+                  <input type="checkbox" name="\${key}" id="field_\${key}" \${value ? 'checked' : ''}>
+                  <label for="field_\${key}">\${prop.label}</label>
+                </div>
+                \${prop.description ? \`<div class="field-description">\${prop.description}</div>\` : ''}
+              </div>
+            \`;
+            break;
+            
+          case 'select':
+            fieldHtml = \`
+              <div class="form-group">
+                <label>\${prop.label} \${prop.required ? '<span class="required">*</span>' : ''}</label>
+                <select name="\${key}">
+                  \${prop.options.map(opt => \`<option value="\${opt}" \${value === opt ? 'selected' : ''}>\${opt}</option>\`).join('')}
+                </select>
+                \${prop.description ? \`<div class="field-description">\${prop.description}</div>\` : ''}
+              </div>
+            \`;
+            break;
+            
+          case 'array':
+            const arrayValues = Array.isArray(value) ? value : [];
+            fieldHtml = \`
+              <div class="form-group">
+                <label>\${prop.label} \${prop.required ? '<span class="required">*</span>' : ''}</label>
+                <div class="array-input-container" id="array_\${key}">
+                  \${arrayValues.map((v, i) => \`
+                    <div class="array-input-row">
+                      <input type="text" name="\${key}[]" value="\${v}">
+                      <button type="button" class="btn-array-remove" onclick="this.parentElement.remove()">
+                        <i data-lucide="x" class="lucide-sm"></i>
+                      </button>
+                    </div>
+                  \`).join('')}
+                  <button type="button" class="btn-array-add" onclick="addArrayItem('\${key}')">
+                    <i data-lucide="plus" class="lucide-sm"></i>
+                    Add Item
+                  </button>
+                </div>
+                \${prop.description ? \`<div class="field-description">\${prop.description}</div>\` : ''}
+              </div>
+            \`;
+            break;
+        }
+        
+        form.innerHTML += fieldHtml;
+      }
+    }
+    
+    function addArrayItem(key) {
+      const container = document.getElementById('array_' + key);
+      const addBtn = container.querySelector('.btn-array-add');
+      const newRow = document.createElement('div');
+      newRow.className = 'array-input-row';
+      newRow.innerHTML = \`
+        <input type="text" name="\${key}[]" value="">
+        <button type="button" class="btn-array-remove" onclick="this.parentElement.remove()">
+          <i data-lucide="x" class="lucide-sm"></i>
+        </button>
+      \`;
+      container.insertBefore(newRow, addBtn);
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+    
+    function closeNodeEditor() {
+      document.getElementById('nodeEditorOverlay').classList.remove('active');
+      selectedNodeId = null;
+      selectedNodeData = null;
+      document.querySelectorAll('.workflow-node.selected').forEach(n => n.classList.remove('selected'));
+    }
+    
+    function saveNodeChanges() {
+      if (!selectedNodeData || !currentWorkflow) {
+        closeNodeEditor();
+        return;
+      }
+      
+      const form = document.getElementById('nodeEditorForm');
+      const formData = new FormData(form);
+      const schema = nodeTypeSchemas[selectedNodeData.type];
+      
+      // Build new data object
+      const newData = {};
+      
+      for (const [key, prop] of Object.entries(schema.properties)) {
+        if (prop.type === 'boolean') {
+          newData[key] = form.querySelector(\`[name="\${key}"]\`).checked;
+        } else if (prop.type === 'array') {
+          const inputs = form.querySelectorAll(\`[name="\${key}[]"]\`);
+          newData[key] = Array.from(inputs).map(i => i.value).filter(v => v.trim() !== '');
+        } else if (prop.type === 'number') {
+          const val = formData.get(key);
+          newData[key] = val ? parseFloat(val) : prop.default;
+        } else {
+          newData[key] = formData.get(key) || prop.default || '';
+        }
+      }
+      
+      // Update the node in currentWorkflow
+      const nodeIndex = currentWorkflow.nodes.findIndex(n => n.id === selectedNodeData.id);
+      if (nodeIndex !== -1) {
+        currentWorkflow.nodes[nodeIndex].data = newData;
+        
+        // Re-render nodes to reflect changes
+        renderWorkflowNodes(currentWorkflow.nodes);
+        renderWorkflowEdges(currentWorkflow.edges || [], currentWorkflow.nodes);
+        
+        showToast('Node configuration saved!', 'success');
+      }
+      
+      closeNodeEditor();
+    }
+    
+    function deleteCurrentNode() {
+      if (!selectedNodeData || !currentWorkflow) {
+        closeNodeEditor();
+        return;
+      }
+      
+      if (!confirm('Are you sure you want to delete this node?')) {
+        return;
+      }
+      
+      // Remove node
+      currentWorkflow.nodes = currentWorkflow.nodes.filter(n => n.id !== selectedNodeData.id);
+      
+      // Remove related edges
+      currentWorkflow.edges = (currentWorkflow.edges || []).filter(e => 
+        e.source !== selectedNodeData.id && e.target !== selectedNodeData.id
+      );
+      
+      // Re-render
+      renderWorkflowNodes(currentWorkflow.nodes);
+      renderWorkflowEdges(currentWorkflow.edges, currentWorkflow.nodes);
+      
+      showToast('Node deleted', 'info');
+      closeNodeEditor();
+    }
+    
+    function duplicateCurrentNode() {
+      if (!selectedNodeData || !currentWorkflow) {
+        closeNodeEditor();
+        return;
+      }
+      
+      // Create duplicate with new ID and offset position
+      const newNode = {
+        id: 'node_' + Date.now(),
+        type: selectedNodeData.type,
+        position: {
+          x: (selectedNodeData.position?.x || 0) + 50,
+          y: (selectedNodeData.position?.y || 0) + 50
+        },
+        data: { ...selectedNodeData.data }
+      };
+      
+      currentWorkflow.nodes.push(newNode);
+      
+      // Re-render
+      renderWorkflowNodes(currentWorkflow.nodes);
+      renderWorkflowEdges(currentWorkflow.edges || [], currentWorkflow.nodes);
+      
+      showToast('Node duplicated', 'success');
+      closeNodeEditor();
+      
+      // Select the new node
+      setTimeout(() => {
+        handleNodeClick(newNode.id, { stopPropagation: () => {} });
+      }, 100);
     }
     
     async function runDetectionCycle() {
