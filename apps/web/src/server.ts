@@ -3619,6 +3619,14 @@ const dashboardHTML = `<!DOCTYPE html>
       load: { load1: [], load5: [], load15: [] }
     };
     const maxPoints = 60;
+    
+    // View-specific data storage (must be before showTab is called)
+    let cpuViewData = { cpu: [] };
+    let cpuCoresList = [];
+    let memViewData = { used: [], swap: [] };
+    let networkPacketsHistory = [];
+    let currentTemplateFilter = 'all';
+
 
     // ==========================================
     // CHART DRAWING (Pure Canvas, No Library)
@@ -4428,7 +4436,8 @@ const dashboardHTML = `<!DOCTYPE html>
             knob.style.background = '#10b981';
           }
           if (parent) {
-            parent.querySelector('span')!.style.background = 'rgba(16, 185, 129, 0.3)';
+            const bg = parent.querySelector('span');
+            if (bg) bg.style.background = 'rgba(16, 185, 129, 0.3)';
           }
           if (label) {
             label.textContent = 'Autonomous ON';
@@ -4729,7 +4738,6 @@ const dashboardHTML = `<!DOCTYPE html>
       if (typeof lucide !== 'undefined') lucide.createIcons();
     }
     
-    let currentTemplateFilter = 'all';
     
     function filterTemplates(category) {
       currentTemplateFilter = category;
@@ -5910,8 +5918,6 @@ const dashboardHTML = `<!DOCTYPE html>
     // ==========================================
     // CPU VIEW DATA LOADING
     // ==========================================
-    let cpuViewData = { cpu: [] };
-    let cpuCoresList = [];
     
     async function loadCPUView() {
       // Load aggregate CPU data
@@ -6036,7 +6042,6 @@ const dashboardHTML = `<!DOCTYPE html>
     // ==========================================
     // MEMORY VIEW DATA LOADING
     // ==========================================
-    let memViewData = { used: [], swap: [] };
     
     async function loadMemoryView() {
       // Load memory stats and chart
@@ -6347,7 +6352,6 @@ const dashboardHTML = `<!DOCTYPE html>
     // ==========================================
     // NETWORK VIEW DATA LOADING
     // ==========================================
-    let networkPacketsHistory = [];
     
     async function loadNetworkView() {
       // Load network stats

@@ -157,7 +157,37 @@ class ShellCommandExecutor(NodeExecutor):
 
 
 class DockerActionExecutor(NodeExecutor):
-    """Execute Docker container actions."""
+    """
+    Execute Docker container actions.
+    
+    This executor uses the production Docker executor from executors.docker_executor
+    for native Docker SDK operations with:
+    - Container lifecycle (start, stop, restart, kill, remove)
+    - Log retrieval
+    - Health status checking
+    - Resource statistics
+    - Command execution inside containers
+    
+    Falls back to subprocess commands if Docker SDK is unavailable.
+    """
+    
+    def __init__(self):
+        self._docker_executor = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """Lazy initialization of Docker executor."""
+        if not self._initialized:
+            try:
+                from executors.docker_executor import get_docker_executor
+                self._docker_executor = get_docker_executor()
+                self._initialized = True
+            except ImportError as e:
+                logger.warning(f"Docker executor not available: {e}")
+                self._initialized = True  # Don't retry
+            except Exception as e:
+                logger.warning(f"Failed to initialize Docker executor: {e}")
+                self._initialized = True
     
     async def execute(
         self, 
@@ -167,6 +197,9 @@ class DockerActionExecutor(NodeExecutor):
         data = node.get("data", {})
         action = data.get("action", "restart")
         container_name = data.get("container_name", "")
+        timeout = data.get("timeout", 30)
+        tail = data.get("tail", 100)
+        command = data.get("command")  # For exec action
         
         result = NodeExecutionResult(
             node_id=node["id"],
@@ -176,19 +209,141 @@ class DockerActionExecutor(NodeExecutor):
         
         if not container_name:
             result.status = NodeStatus.FAILED
-            result.error = "Container name not specified"
+            result.error = "Container name not specified. Set 'container_name' in node data."
             result.completed_at = datetime.now()
             return result
         
-        # Build Docker command based on action
+        self._ensure_initialized()
+        
+        # Use Docker SDK if available
+        if self._docker_executor is not None:
+            try:
+                loop = asyncio.get_event_loop()
+                
+                if action == "restart":
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.restart_container(container_name, timeout)
+                    )
+                elif action == "stop":
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.stop_container(container_name, timeout)
+                    )
+                elif action == "start":
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.start_container(container_name)
+                    )
+                elif action == "kill":
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.kill_container(container_name)
+                    )
+                elif action == "remove":
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.remove_container(container_name, force=True)
+                    )
+                elif action == "logs":
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.get_logs(container_name, tail=tail)
+                    )
+                elif action == "health":
+                    health = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.get_health_status(container_name)
+                    )
+                    result.status = NodeStatus.SUCCESS
+                    result.output = json.dumps(health, indent=2)
+                    result.metrics = health
+                    result.completed_at = datetime.now()
+                    result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+                    return result
+                elif action == "stats":
+                    stats = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.get_stats(container_name)
+                    )
+                    result.status = NodeStatus.SUCCESS
+                    result.output = json.dumps(stats, indent=2)
+                    result.metrics = stats
+                    result.completed_at = datetime.now()
+                    result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+                    return result
+                elif action == "exec" and command:
+                    docker_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.exec_in_container(container_name, command)
+                    )
+                elif action == "inspect":
+                    inspection = await loop.run_in_executor(
+                        None,
+                        lambda: self._docker_executor.inspect_container(container_name)
+                    )
+                    result.status = NodeStatus.SUCCESS
+                    result.output = json.dumps(inspection, indent=2)[:5000]  # Truncate
+                    result.completed_at = datetime.now()
+                    result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+                    return result
+                else:
+                    result.status = NodeStatus.FAILED
+                    result.error = f"Unknown Docker action: {action}"
+                    result.completed_at = datetime.now()
+                    return result
+                
+                # Process result from Docker executor
+                result.output = docker_result.logs if hasattr(docker_result, 'logs') else docker_result.message
+                result.metrics = {
+                    "container_name": container_name,
+                    "action": action,
+                    "container_id": docker_result.container_id,
+                    "duration_ms": docker_result.duration_ms
+                }
+                
+                if docker_result.success:
+                    result.status = NodeStatus.SUCCESS
+                else:
+                    result.status = NodeStatus.FAILED
+                    result.error = docker_result.error
+                
+                result.completed_at = datetime.now()
+                result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+                return result
+                
+            except Exception as e:
+                logger.warning(f"Docker SDK execution failed, falling back to subprocess: {e}")
+                # Fall through to subprocess fallback
+        
+        # Fallback: subprocess execution
+        return await self._execute_subprocess(node, container_name, action, timeout, tail)
+    
+    async def _execute_subprocess(
+        self,
+        node: Dict[str, Any],
+        container_name: str,
+        action: str,
+        timeout: int,
+        tail: int
+    ) -> NodeExecutionResult:
+        """Fallback subprocess execution for Docker commands."""
+        result = NodeExecutionResult(
+            node_id=node["id"],
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now()
+        )
+        
         docker_commands = {
             "restart": f"docker restart {shlex.quote(container_name)}",
-            "stop": f"docker stop {shlex.quote(container_name)}",
+            "stop": f"docker stop -t {timeout} {shlex.quote(container_name)}",
             "start": f"docker start {shlex.quote(container_name)}",
             "kill": f"docker kill {shlex.quote(container_name)}",
             "remove": f"docker rm -f {shlex.quote(container_name)}",
-            "logs": f"docker logs --tail 100 {shlex.quote(container_name)}",
+            "logs": f"docker logs --tail {tail} {shlex.quote(container_name)}",
             "inspect": f"docker inspect {shlex.quote(container_name)}",
+            "health": f"docker inspect --format='{{{{.State.Health.Status}}}}' {shlex.quote(container_name)}",
+            "stats": f"docker stats --no-stream --format='{{{{json .}}}}' {shlex.quote(container_name)}",
         }
         
         command = docker_commands.get(action)
@@ -207,7 +362,7 @@ class DockerActionExecutor(NodeExecutor):
             
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
-                timeout=60
+                timeout=max(timeout + 10, 60)
             )
             
             result.output = stdout.decode("utf-8", errors="replace")
@@ -218,6 +373,9 @@ class DockerActionExecutor(NodeExecutor):
             else:
                 result.status = NodeStatus.FAILED
                 
+        except asyncio.TimeoutError:
+            result.status = NodeStatus.FAILED
+            result.error = f"Docker command timed out after {timeout}s"
         except Exception as e:
             result.status = NodeStatus.FAILED
             result.error = str(e)
@@ -226,6 +384,7 @@ class DockerActionExecutor(NodeExecutor):
         result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
         
         return result
+
 
 
 class ServiceActionExecutor(NodeExecutor):
@@ -597,10 +756,462 @@ class AlertTriggerExecutor(NodeExecutor):
         return result
 
 
+class SSHCommandExecutor(NodeExecutor):
+    """
+    Execute commands on remote hosts via SSH.
+    
+    This executor uses the production SSH executor from executors.ssh_executor
+    for real remote command execution with:
+    - Connection pooling
+    - Retry logic with exponential backoff
+    - Key-based and password authentication
+    - Output streaming
+    """
+    
+    def __init__(self):
+        self._ssh_executor = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """Lazy initialization of SSH executor."""
+        if not self._initialized:
+            try:
+                from executors.ssh_executor import get_ssh_executor
+                self._ssh_executor = get_ssh_executor()
+                self._initialized = True
+            except ImportError as e:
+                logger.warning(f"SSH executor not available: {e}")
+                self._initialized = True  # Don't retry
+    
+    async def execute(
+        self, 
+        node: Dict[str, Any], 
+        context: WorkflowExecutionContext
+    ) -> NodeExecutionResult:
+        data = node.get("data", {})
+        
+        hostname = data.get("hostname") or data.get("host", "")
+        command = data.get("command", "echo 'No command specified'")
+        username = data.get("username", "root")
+        port = data.get("port", 22)
+        private_key_path = data.get("private_key_path") or data.get("key_path")
+        password = data.get("password")
+        timeout = data.get("timeout", 30)
+        command_timeout = data.get("command_timeout", 300)
+        
+        result = NodeExecutionResult(
+            node_id=node["id"],
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now()
+        )
+        
+        if not hostname:
+            result.status = NodeStatus.FAILED
+            result.error = "Hostname not specified. Set 'hostname' in node data."
+            result.completed_at = datetime.now()
+            return result
+        
+        self._ensure_initialized()
+        
+        if self._ssh_executor is None:
+            # Fallback: try local subprocess if SSH to localhost
+            if hostname in ("localhost", "127.0.0.1"):
+                return await self._execute_locally(command, timeout, node["id"])
+            
+            result.status = NodeStatus.FAILED
+            result.error = "SSH executor not available. Install paramiko: pip install paramiko"
+            result.completed_at = datetime.now()
+            return result
+        
+        try:
+            # Execute via SSH executor in a thread pool (it's sync)
+            loop = asyncio.get_event_loop()
+            ssh_result = await loop.run_in_executor(
+                None,
+                lambda: self._ssh_executor.execute(
+                    hostname=hostname,
+                    command=command,
+                    username=username,
+                    port=port,
+                    password=password,
+                    private_key_path=private_key_path,
+                    timeout=timeout,
+                    command_timeout=command_timeout
+                )
+            )
+            
+            result.output = ssh_result.stdout
+            result.error = ssh_result.stderr
+            result.metrics = {
+                "hostname": hostname,
+                "exit_code": ssh_result.exit_code,
+                "duration_ms": ssh_result.duration_ms
+            }
+            
+            if ssh_result.success:
+                result.status = NodeStatus.SUCCESS
+            else:
+                result.status = NodeStatus.FAILED
+                if ssh_result.error:
+                    result.error = f"{ssh_result.error}\n{result.error}".strip()
+                    
+        except Exception as e:
+            result.status = NodeStatus.FAILED
+            result.error = f"SSH execution failed: {str(e)}"
+            logger.error(f"SSH execution error: {e}")
+        
+        result.completed_at = datetime.now()
+        result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+        
+        return result
+    
+    async def _execute_locally(
+        self, 
+        command: str, 
+        timeout: int, 
+        node_id: str
+    ) -> NodeExecutionResult:
+        """Fallback for localhost execution."""
+        result = NodeExecutionResult(
+            node_id=node_id,
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now()
+        )
+        
+        try:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout
+            )
+            
+            result.output = stdout.decode("utf-8", errors="replace")
+            result.error = stderr.decode("utf-8", errors="replace")
+            
+            if process.returncode == 0:
+                result.status = NodeStatus.SUCCESS
+            else:
+                result.status = NodeStatus.FAILED
+                result.error = f"Exit code: {process.returncode}\n{result.error}"
+                
+        except asyncio.TimeoutError:
+            result.status = NodeStatus.FAILED
+            result.error = f"Command timed out after {timeout}s"
+        except Exception as e:
+            result.status = NodeStatus.FAILED
+            result.error = str(e)
+        
+        result.completed_at = datetime.now()
+        result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+        
+        return result
+
+
+class APICallExecutor(NodeExecutor):
+    """
+    Execute HTTP API calls.
+    
+    This executor uses the production API executor from executors.api_executor
+    for HTTP requests with:
+    - Multiple authentication methods (Bearer, Basic, API Key)
+    - Retry with exponential backoff
+    - Response parsing (JSON, XML, text)
+    - Timeout handling
+    """
+    
+    def __init__(self):
+        self._api_executor = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """Lazy initialization of API executor."""
+        if not self._initialized:
+            try:
+                from executors.api_executor import get_api_executor
+                self._api_executor = get_api_executor()
+                self._initialized = True
+            except ImportError as e:
+                logger.warning(f"API executor not available: {e}")
+                self._initialized = True
+    
+    async def execute(
+        self, 
+        node: Dict[str, Any], 
+        context: WorkflowExecutionContext
+    ) -> NodeExecutionResult:
+        data = node.get("data", {})
+        
+        url = data.get("url", "")
+        method = data.get("method", "GET").upper()
+        headers = data.get("headers", {})
+        body = data.get("body") or data.get("json")
+        params = data.get("params", {})
+        timeout = data.get("timeout", 30)
+        
+        # Auth config
+        auth_type = data.get("auth_type", "none")
+        token = data.get("token") or data.get("bearer_token")
+        api_key = data.get("api_key")
+        username = data.get("username")
+        password = data.get("password")
+        
+        result = NodeExecutionResult(
+            node_id=node["id"],
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now()
+        )
+        
+        if not url:
+            result.status = NodeStatus.FAILED
+            result.error = "URL not specified. Set 'url' in node data."
+            result.completed_at = datetime.now()
+            return result
+        
+        self._ensure_initialized()
+        
+        # Use API executor if available
+        if self._api_executor is not None:
+            try:
+                from executors.api_executor import AuthConfig, AuthType as ApiAuthType, HTTPMethod
+                
+                # Build auth config
+                auth = None
+                if auth_type == "bearer" and token:
+                    auth = AuthConfig(auth_type=ApiAuthType.BEARER, token=token)
+                elif auth_type == "basic" and username:
+                    auth = AuthConfig(
+                        auth_type=ApiAuthType.BASIC, 
+                        username=username, 
+                        password=password
+                    )
+                elif auth_type == "api_key" and api_key:
+                    auth = AuthConfig(
+                        auth_type=ApiAuthType.API_KEY_HEADER,
+                        api_key=api_key,
+                        api_key_name=data.get("api_key_name", "X-API-Key")
+                    )
+                
+                # Execute in thread pool (sync API executor)
+                loop = asyncio.get_event_loop()
+                api_result = await loop.run_in_executor(
+                    None,
+                    lambda: self._api_executor.request(
+                        method=method,
+                        url=url,
+                        headers=headers if headers else None,
+                        json=body if isinstance(body, dict) else None,
+                        data=body if isinstance(body, str) else None,
+                        params=params if params else None,
+                        auth=auth,
+                        timeout=timeout
+                    )
+                )
+                
+                result.output = api_result.response_body[:5000] if api_result.response_body else ""
+                result.metrics = {
+                    "status_code": api_result.status_code,
+                    "url": url,
+                    "method": method,
+                    "duration_ms": api_result.duration_ms,
+                    "retries": api_result.retries
+                }
+                
+                # Store response JSON in context
+                if api_result.response_json:
+                    context.variables[f"{node['id']}_response"] = api_result.response_json
+                
+                if api_result.success:
+                    result.status = NodeStatus.SUCCESS
+                else:
+                    result.status = NodeStatus.FAILED
+                    result.error = api_result.error or f"HTTP {api_result.status_code}"
+                
+                result.completed_at = datetime.now()
+                result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+                return result
+                
+            except Exception as e:
+                logger.warning(f"API executor failed, falling back to httpx: {e}")
+        
+        # Fallback: direct httpx call
+        return await self._execute_fallback(node, url, method, headers, body, params, timeout)
+    
+    async def _execute_fallback(
+        self,
+        node: Dict[str, Any],
+        url: str,
+        method: str,
+        headers: Dict,
+        body: Any,
+        params: Dict,
+        timeout: int
+    ) -> NodeExecutionResult:
+        """Fallback using httpx directly."""
+        result = NodeExecutionResult(
+            node_id=node["id"],
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now()
+        )
+        
+        try:
+            import httpx
+            
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    headers=headers if headers else None,
+                    json=body if isinstance(body, dict) else None,
+                    content=body if isinstance(body, str) else None,
+                    params=params if params else None
+                )
+                
+                result.output = response.text[:5000]
+                result.metrics = {
+                    "status_code": response.status_code,
+                    "url": url,
+                    "method": method
+                }
+                
+                if response.is_success:
+                    result.status = NodeStatus.SUCCESS
+                else:
+                    result.status = NodeStatus.FAILED
+                    result.error = f"HTTP {response.status_code}"
+                    
+        except ImportError:
+            result.status = NodeStatus.FAILED
+            result.error = "httpx not available. Run: pip install httpx"
+        except Exception as e:
+            result.status = NodeStatus.FAILED
+            result.error = str(e)
+        
+        result.completed_at = datetime.now()
+        result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+        return result
+
+
+class WebhookExecutor(NodeExecutor):
+    """
+    Send webhook notifications.
+    
+    Supports:
+    - Generic webhooks
+    - Slack integration
+    - PagerDuty integration
+    - OpsGenie integration
+    """
+    
+    def __init__(self):
+        self._api_executor = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        if not self._initialized:
+            try:
+                from executors.api_executor import get_api_executor
+                self._api_executor = get_api_executor()
+                self._initialized = True
+            except ImportError:
+                self._initialized = True
+    
+    async def execute(
+        self, 
+        node: Dict[str, Any], 
+        context: WorkflowExecutionContext
+    ) -> NodeExecutionResult:
+        data = node.get("data", {})
+        
+        url = data.get("url") or data.get("webhook_url", "")
+        webhook_type = data.get("webhook_type", "generic")  # generic, slack, pagerduty, opsgenie
+        payload = data.get("payload", {})
+        
+        result = NodeExecutionResult(
+            node_id=node["id"],
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now()
+        )
+        
+        if not url:
+            result.status = NodeStatus.FAILED
+            result.error = "Webhook URL not specified"
+            result.completed_at = datetime.now()
+            return result
+        
+        self._ensure_initialized()
+        
+        if self._api_executor is not None:
+            try:
+                loop = asyncio.get_event_loop()
+                
+                if webhook_type == "slack":
+                    text = data.get("text") or data.get("message", "Alert from AIOps")
+                    channel = data.get("channel")
+                    api_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._api_executor.call_slack_webhook(
+                            url, text, channel=channel
+                        )
+                    )
+                elif webhook_type == "pagerduty":
+                    api_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._api_executor.call_pagerduty(
+                            routing_key=data.get("routing_key", ""),
+                            event_action=data.get("event_action", "trigger"),
+                            dedup_key=data.get("dedup_key", context.workflow_id),
+                            summary=data.get("summary", "AIOps Alert"),
+                            source=data.get("source", "aiops-platform"),
+                            severity=data.get("severity", "error")
+                        )
+                    )
+                else:
+                    api_result = await loop.run_in_executor(
+                        None,
+                        lambda: self._api_executor.send_webhook(url, payload)
+                    )
+                
+                result.output = api_result.response_body[:2000] if api_result.response_body else ""
+                result.metrics = {
+                    "webhook_type": webhook_type,
+                    "status_code": api_result.status_code,
+                    "duration_ms": api_result.duration_ms
+                }
+                
+                if api_result.success:
+                    result.status = NodeStatus.SUCCESS
+                else:
+                    result.status = NodeStatus.FAILED
+                    result.error = api_result.error or f"HTTP {api_result.status_code}"
+                
+                result.completed_at = datetime.now()
+                result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+                return result
+                
+            except Exception as e:
+                result.status = NodeStatus.FAILED
+                result.error = str(e)
+        else:
+            result.status = NodeStatus.FAILED
+            result.error = "API executor not available"
+        
+        result.completed_at = datetime.now()
+        result.duration_ms = int((result.completed_at - result.started_at).total_seconds() * 1000)
+        return result
+
+
 # Node executor registry
 NODE_EXECUTORS: Dict[str, NodeExecutor] = {
     "shell_command": ShellCommandExecutor(),
-    "docker_action": DockerActionExecutor(),
+    "ssh_command": SSHCommandExecutor(),  # Phase 6A: Remote SSH execution
+    "docker_action": DockerActionExecutor(),  # Phase 6B: Container management
+    "api_call": APICallExecutor(),  # Phase 6D: HTTP API calls
+    "webhook": WebhookExecutor(),  # Phase 6D: Webhook notifications  
     "service_action": ServiceActionExecutor(),
     "metric_check": MetricCheckExecutor(),
     "delay": DelayExecutor(),
@@ -615,6 +1226,8 @@ NODE_EXECUTORS: Dict[str, NodeExecutor] = {
     "schedule_trigger": AlertTriggerExecutor(),
     "webhook_trigger": AlertTriggerExecutor(),
 }
+
+
 
 
 class WorkflowExecutor:

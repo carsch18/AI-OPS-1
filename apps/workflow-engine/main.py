@@ -1937,11 +1937,600 @@ async def process_issue_autonomous(
 
 
 # ============================================================
+# SSH EXECUTOR ENDPOINTS (Phase 6A)
+# ============================================================
+
+class SSHTestRequest(BaseModel):
+    hostname: str
+    username: str = "root"
+    port: int = 22
+    password: Optional[str] = None
+    private_key_path: Optional[str] = None
+
+class SSHExecuteRequest(BaseModel):
+    hostname: str
+    command: str
+    username: str = "root"
+    port: int = 22
+    password: Optional[str] = None
+    private_key_path: Optional[str] = None
+    timeout: int = 30
+    command_timeout: int = 300
+
+
+@app.post("/api/ssh/test")
+async def test_ssh_connection(request: SSHTestRequest):
+    """Test SSH connectivity to a host."""
+    try:
+        from executors.ssh_executor import get_ssh_executor, SSHCredentials, AuthMethod
+        
+        # Determine auth method
+        if request.password:
+            auth_method = AuthMethod.PASSWORD
+        elif request.private_key_path:
+            auth_method = AuthMethod.KEY
+        else:
+            auth_method = AuthMethod.AGENT
+        
+        creds = SSHCredentials(
+            hostname=request.hostname,
+            username=request.username,
+            port=request.port,
+            password=request.password,
+            private_key_path=request.private_key_path,
+            auth_method=auth_method
+        )
+        
+        executor = get_ssh_executor()
+        
+        # Run in thread pool since it's sync
+        import asyncio
+        loop = asyncio.get_event_loop()
+        success, message = await loop.run_in_executor(
+            None,
+            lambda: executor.test_connection(creds)
+        )
+        
+        return {
+            "success": success,
+            "message": message,
+            "host": request.hostname
+        }
+        
+    except ImportError:
+        return {
+            "success": False,
+            "message": "SSH executor not available. Run: pip install paramiko",
+            "host": request.hostname
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": str(e),
+            "host": request.hostname
+        }
+
+
+@app.post("/api/ssh/execute")
+async def execute_ssh_command(request: SSHExecuteRequest):
+    """Execute a command on a remote host via SSH."""
+    try:
+        from executors.ssh_executor import get_ssh_executor
+        
+        executor = get_ssh_executor()
+        
+        # Run in thread pool since it's sync
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: executor.execute(
+                hostname=request.hostname,
+                command=request.command,
+                username=request.username,
+                port=request.port,
+                password=request.password,
+                private_key_path=request.private_key_path,
+                timeout=request.timeout,
+                command_timeout=request.command_timeout
+            )
+        )
+        
+        return {
+            "success": result.success,
+            "hostname": result.hostname,
+            "command": result.command,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "duration_ms": result.duration_ms,
+            "error": result.error
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503, 
+            detail="SSH executor not available. Run: pip install paramiko"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ssh/hosts")
+async def list_ssh_hosts():
+    """List registered SSH hosts from credential manager."""
+    try:
+        from executors.credential_config import get_credential_manager
+        
+        manager = get_credential_manager()
+        hosts = manager.list_hosts()
+        
+        return {
+            "hosts": hosts,
+            "count": len(hosts)
+        }
+        
+    except ImportError:
+        return {
+            "hosts": [],
+            "count": 0,
+            "message": "Credential manager not available"
+        }
+
+
+@app.post("/api/ssh/hosts")
+async def register_ssh_host(
+    alias: str,
+    hostname: str,
+    username: str = "root",
+    port: int = 22,
+    private_key_path: Optional[str] = None,
+    password: Optional[str] = None,
+    tags: Optional[List[str]] = None
+):
+    """Register a new SSH host for quick access."""
+    try:
+        from executors.credential_config import get_credential_manager, HostConfig
+        
+        manager = get_credential_manager()
+        
+        config = HostConfig(
+            alias=alias,
+            hostname=hostname,
+            username=username,
+            port=port,
+            private_key_path=private_key_path,
+            password=password,
+            tags=tags or []
+        )
+        
+        manager.add_host(config)
+        
+        return {
+            "success": True,
+            "message": f"Host '{alias}' registered successfully",
+            "alias": alias,
+            "hostname": hostname
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Credential manager not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============================================================
+# DOCKER EXECUTOR ENDPOINTS (Phase 6B)
+# ============================================================
+
+class DockerContainerActionRequest(BaseModel):
+    container_name: str
+    action: str = "restart"  # start, stop, restart, kill, remove
+    timeout: int = 30
+
+class DockerExecRequest(BaseModel):
+    container_name: str
+    command: str
+    workdir: Optional[str] = None
+    user: Optional[str] = None
+
+
+@app.get("/api/docker/containers")
+async def list_docker_containers(all: bool = False):
+    """List Docker containers."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        containers = executor.list_containers(all=all)
+        
+        return {
+            "containers": containers,
+            "count": len(containers)
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available. Run: pip install docker"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/docker/container/action")
+async def docker_container_action(request: DockerContainerActionRequest):
+    """Perform action on Docker container."""
+    try:
+        from executors.docker_executor import get_docker_executor, ContainerAction
+        
+        executor = get_docker_executor()
+        
+        # Map action string to ContainerAction enum
+        action_map = {
+            "start": ContainerAction.START,
+            "stop": ContainerAction.STOP,
+            "restart": ContainerAction.RESTART,
+            "kill": ContainerAction.KILL,
+            "pause": ContainerAction.PAUSE,
+            "unpause": ContainerAction.UNPAUSE,
+            "remove": ContainerAction.REMOVE,
+        }
+        
+        action = action_map.get(request.action.lower())
+        if not action:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid action: {request.action}. Valid: {list(action_map.keys())}"
+            )
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: executor.container_action(
+                request.container_name,
+                action,
+                timeout=request.timeout
+            )
+        )
+        
+        return result.to_dict()
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available. Run: pip install docker"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/docker/container/{container_name}/logs")
+async def get_docker_logs(
+    container_name: str,
+    tail: int = 100,
+    timestamps: bool = True
+):
+    """Get container logs."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: executor.get_logs(container_name, tail=tail, timestamps=timestamps)
+        )
+        
+        return result.to_dict()
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/docker/container/{container_name}/health")
+async def get_docker_health(container_name: str):
+    """Get container health status."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        health = await loop.run_in_executor(
+            None,
+            lambda: executor.get_health_status(container_name)
+        )
+        
+        return health
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/docker/container/{container_name}/stats")
+async def get_docker_stats(container_name: str):
+    """Get container resource statistics."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        stats = await loop.run_in_executor(
+            None,
+            lambda: executor.get_stats(container_name)
+        )
+        
+        return stats
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/docker/container/exec")
+async def docker_exec_command(request: DockerExecRequest):
+    """Execute command inside a running container."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: executor.exec_in_container(
+                request.container_name,
+                request.command,
+                workdir=request.workdir,
+                user=request.user
+            )
+        )
+        
+        return result.to_dict()
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/docker/images")
+async def list_docker_images():
+    """List local Docker images."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        images = await loop.run_in_executor(
+            None,
+            executor.list_images
+        )
+        
+        return {
+            "images": images,
+            "count": len(images)
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/docker/image/pull")
+async def pull_docker_image(image_name: str, tag: str = "latest"):
+    """Pull Docker image from registry."""
+    try:
+        from executors.docker_executor import get_docker_executor
+        
+        executor = get_docker_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: executor.pull_image(image_name, tag=tag)
+        )
+        
+        return result.to_dict()
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# API EXECUTOR ENDPOINTS (Phase 6D)
+# ============================================================
+
+class APIRequestPayload(BaseModel):
+    url: str
+    method: str = "GET"
+    headers: Optional[Dict[str, str]] = None
+    body: Optional[Dict[str, Any]] = None
+    params: Optional[Dict[str, str]] = None
+    timeout: int = 30
+    auth_type: Optional[str] = None  # bearer, basic, api_key
+    token: Optional[str] = None
+    api_key: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+class WebhookPayloadModel(BaseModel):
+    url: str
+    webhook_type: str = "generic"  # generic, slack, pagerduty, opsgenie
+    payload: Optional[Dict[str, Any]] = None
+    text: Optional[str] = None  # For Slack
+    routing_key: Optional[str] = None  # For PagerDuty
+    summary: Optional[str] = None
+
+
+@app.post("/api/http/request")
+async def make_http_request(request: APIRequestPayload):
+    """Make an HTTP request using the API executor."""
+    try:
+        from executors.api_executor import get_api_executor, AuthConfig, AuthType as ApiAuthType
+        
+        executor = get_api_executor()
+        
+        # Build auth
+        auth = None
+        if request.auth_type == "bearer" and request.token:
+            auth = AuthConfig(auth_type=ApiAuthType.BEARER, token=request.token)
+        elif request.auth_type == "basic" and request.username:
+            auth = AuthConfig(
+                auth_type=ApiAuthType.BASIC,
+                username=request.username,
+                password=request.password
+            )
+        elif request.auth_type == "api_key" and request.api_key:
+            auth = AuthConfig(
+                auth_type=ApiAuthType.API_KEY_HEADER,
+                api_key=request.api_key
+            )
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: executor.request(
+                method=request.method.upper(),
+                url=request.url,
+                headers=request.headers,
+                json=request.body,
+                params=request.params,
+                auth=auth,
+                timeout=request.timeout
+            )
+        )
+        
+        return result.to_dict()
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="API executor not available. Run: pip install httpx"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/webhook/send")
+async def send_webhook(request: WebhookPayloadModel):
+    """Send a webhook notification."""
+    try:
+        from executors.api_executor import get_api_executor
+        
+        executor = get_api_executor()
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
+        if request.webhook_type == "slack":
+            result = await loop.run_in_executor(
+                None,
+                lambda: executor.call_slack_webhook(
+                    request.url,
+                    request.text or "Alert from AIOps"
+                )
+            )
+        elif request.webhook_type == "pagerduty":
+            result = await loop.run_in_executor(
+                None,
+                lambda: executor.call_pagerduty(
+                    routing_key=request.routing_key or "",
+                    event_action="trigger",
+                    dedup_key=f"aiops-{datetime.now().timestamp()}",
+                    summary=request.summary or "AIOps Alert",
+                    source="aiops-platform"
+                )
+            )
+        else:
+            result = await loop.run_in_executor(
+                None,
+                lambda: executor.send_webhook(request.url, request.payload or {})
+            )
+        
+        return result.to_dict()
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="API executor not available"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/executor/stats")
+async def get_api_executor_stats():
+    """Get API executor statistics."""
+    try:
+        from executors.api_executor import get_api_executor
+        
+        executor = get_api_executor()
+        stats = executor.get_stats()
+        
+        return {
+            "executor": "api",
+            "stats": stats
+        }
+        
+    except ImportError:
+        return {
+            "executor": "api",
+            "stats": None,
+            "message": "API executor not available"
+        }
+
+
+# ============================================================
 # RUN SERVER
 # ============================================================
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8001)
+
+
 
 
