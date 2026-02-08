@@ -149,7 +149,7 @@ export const ApprovalNode = memo((props: CustomNodeProps) => {
                 {/* Body with approval info */}
                 <div className="node-body">
                     <div className="node-config-preview">
-                        ⏱️ Timeout: {data.config?.timeout_minutes || 30}m
+                        ⏱️ Timeout: {String(data.config?.timeout_minutes ?? 30)}m
                     </div>
                 </div>
 
@@ -215,7 +215,7 @@ export const ConditionNode = memo((props: CustomNodeProps) => {
                 {/* Body with condition preview */}
                 <div className="node-body">
                     <div className="node-config-preview">
-                        {data.config?.left_value || '{{value}}'} {data.config?.condition_type || 'equals'} {data.config?.right_value || '?'}
+                        {String(data.config?.left_value ?? '{{value}}')} {String(data.config?.condition_type ?? 'equals')} {String(data.config?.right_value ?? '?')}
                     </div>
                 </div>
 
@@ -269,7 +269,7 @@ export const DelayNode = memo((props: CustomNodeProps) => {
                 {/* Body */}
                 <div className="node-body">
                     <div className="node-config-preview">
-                        ⏳ Wait {data.config?.duration_seconds || 10} seconds
+                        ⏳ Wait {String(data.config?.duration_seconds ?? 10)} seconds
                     </div>
                 </div>
 

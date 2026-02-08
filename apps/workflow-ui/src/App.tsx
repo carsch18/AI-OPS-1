@@ -1,22 +1,88 @@
 /**
- * AIOps Workflow Builder - Main App
- * Epic visual workflow automation interface
+ * AIOps Platform - Main App with Routing
+ * MAANG-grade unified operations platform
  */
 
 import { useState, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import type { Node } from 'reactflow';
 
+// Import NodeTypeDefinition for double-click handling
+import type { NodeTypeDefinition } from './types/nodeTypes';
+
+// Pages
+import CommandCenter from './pages/CommandCenter';
+import IssuesPage from './pages/Issues';
+import RemediationPage from './pages/Remediation';
+import ExecutorsPage from './pages/Executors';
+import AnalyticsPage from './pages/Analytics';
+import SettingsPage from './pages/Settings';
+
+// Workflow Builder Components (existing)
 import Header from './components/Header';
-import NodePalette from './components/NodePalette';
+import SmartNodePalette from './components/SmartNodePalette';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import PropertyPanel from './components/PropertyPanel';
 import useWorkflowStore from './store/workflowStore';
 import type { WorkflowNodeData } from './store/workflowStore';
 import workflowApi from './services/api';
 
+// Toast Notifications
+import { ToastProvider, ToastContainer, EventToastBridge } from './components/ToastNotifications';
+
+// Error Boundary for graceful crash handling
+import { PageErrorBoundary } from './components/ErrorBoundary';
+import './components/ErrorBoundary.css';
+
 import './index.css';
 
-function App() {
+// Sidebar Navigation Component
+function Sidebar() {
+
+  const navItems = [
+    { path: '/', icon: '🎮', label: 'Command Center' },
+    { path: '/workflows', icon: '📋', label: 'Workflows' },
+    { path: '/issues', icon: '🔥', label: 'Issues', badge: 0 },
+    { path: '/remediation', icon: '🔧', label: 'Remediation' },
+    { path: '/executors', icon: '💻', label: 'Executors' },
+    { path: '/analytics', icon: '📊', label: 'Analytics' },
+  ];
+
+  return (
+    <nav className="sidebar">
+      <div className="sidebar-logo">
+        <span className="logo-icon">⚡</span>
+        <span className="logo-text">AIOps</span>
+      </div>
+
+      <div className="sidebar-nav">
+        {navItems.map(item => (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          >
+            <span className="nav-icon">{item.icon}</span>
+            <span className="nav-label">{item.label}</span>
+            {item.badge !== undefined && item.badge > 0 && (
+              <span className="nav-badge">{item.badge}</span>
+            )}
+          </NavLink>
+        ))}
+      </div>
+
+      <div className="sidebar-footer">
+        <NavLink to="/settings" className="nav-item settings">
+          <span className="nav-icon">⚙️</span>
+          <span className="nav-label">Settings</span>
+        </NavLink>
+      </div>
+    </nav>
+  );
+}
+
+// Workflow Builder Page (existing App content)
+function WorkflowBuilder() {
   const [selectedNode, setSelectedNode] = useState<Node<WorkflowNodeData> | null>(null);
   const [showPropertyPanel, setShowPropertyPanel] = useState(true);
 
@@ -25,9 +91,9 @@ function App() {
     workflowName,
     isActive,
     nodes,
-    edges,
     markSaved,
-    setWorkflowId
+    setWorkflowId,
+    addNode,
   } = useWorkflowStore();
 
   const handleNodeSelect = useCallback((node: Node<WorkflowNodeData> | null) => {
@@ -37,13 +103,30 @@ function App() {
     }
   }, []);
 
+  // Handle double-click from SmartNodePalette to add node to canvas
+  const handleNodeDoubleClick = useCallback((nodeType: NodeTypeDefinition) => {
+    // Add node at center of canvas (roughly)
+    const newNode: Node<WorkflowNodeData> = {
+      id: `${nodeType.subtype}-${Date.now()}`,
+      type: nodeType.type,
+      position: { x: 300 + Math.random() * 200, y: 200 + Math.random() * 100 },
+      data: {
+        label: nodeType.label,
+        type: nodeType.type as 'trigger' | 'action' | 'approval' | 'condition' | 'delay',
+        subtype: nodeType.subtype,
+        icon: nodeType.icon,
+        config: {},
+        description: nodeType.description,
+      },
+    };
+    addNode(newNode);
+  }, [addNode]);
+
   const handleSave = useCallback(async () => {
     try {
-      // Find trigger node to determine trigger type
       const triggerNode = nodes.find(n => n.type === 'trigger');
       const triggerType = triggerNode?.data.subtype || 'manual';
 
-      // Convert React Flow nodes to API format
       const apiNodes = nodes.map(node => ({
         node_type: node.type!,
         node_subtype: node.data.subtype,
@@ -54,31 +137,20 @@ function App() {
         is_start_node: node.type === 'trigger',
       }));
 
-      // Convert edges - need to map to new node IDs after save
-      // For now, we'll create without edges and add them separately
-      /* const apiEdges = edges.map(edge => ({
-        source_node_id: edge.source,
-        target_node_id: edge.target,
-        source_handle: edge.sourceHandle || 'default',
-        condition: null,
-      })); */
-
       if (workflowId) {
-        // Update existing workflow
         await workflowApi.updateWorkflow(workflowId, {
           name: workflowName,
           is_active: isActive,
           trigger_type: triggerType,
         });
       } else {
-        // Create new workflow
         const newWorkflow = await workflowApi.createWorkflow({
           name: workflowName,
           trigger_type: triggerType,
           trigger_config: triggerNode?.data.config || {},
           is_active: isActive,
           nodes: apiNodes,
-          edges: [], // Edges reference temp IDs, need proper mapping
+          edges: [],
         });
         setWorkflowId(newWorkflow.id);
       }
@@ -89,7 +161,7 @@ function App() {
       console.error('❌ Failed to save workflow:', error);
       alert('Failed to save workflow. Is the workflow-engine running?');
     }
-  }, [workflowId, workflowName, isActive, nodes, edges, markSaved, setWorkflowId]);
+  }, [workflowId, workflowName, isActive, nodes, markSaved, setWorkflowId]);
 
   const handleExecute = useCallback(async () => {
     if (!workflowId) {
@@ -111,14 +183,13 @@ function App() {
   }, [workflowId]);
 
   return (
-    <div className="app-container">
+    <div className="workflow-builder">
       <Header onSave={handleSave} onExecute={handleExecute} />
-
       <div className="main-content">
-        <NodePalette />
-
+        <SmartNodePalette
+          onNodeDoubleClick={handleNodeDoubleClick}
+        />
         <WorkflowCanvas onNodeSelect={handleNodeSelect} />
-
         {showPropertyPanel && (
           <PropertyPanel
             node={selectedNode}
@@ -127,6 +198,50 @@ function App() {
         )}
       </div>
     </div>
+  );
+}
+
+
+
+// Main App with Router
+function App() {
+  return (
+    <BrowserRouter>
+      <ToastProvider>
+        <div className="app-root">
+          <Sidebar />
+          <main className="app-main">
+            <Routes>
+              <Route path="/" element={<CommandCenter />} />
+              <Route path="/workflows" element={<WorkflowBuilder />} />
+              <Route path="/issues" element={
+                <PageErrorBoundary pageName="Issues">
+                  <IssuesPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/remediation" element={
+                <PageErrorBoundary pageName="Remediation">
+                  <RemediationPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/executors" element={
+                <PageErrorBoundary pageName="Executors">
+                  <ExecutorsPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/analytics" element={
+                <PageErrorBoundary pageName="Analytics">
+                  <AnalyticsPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </main>
+        </div>
+        <ToastContainer />
+        <EventToastBridge />
+      </ToastProvider>
+    </BrowserRouter>
   );
 }
 

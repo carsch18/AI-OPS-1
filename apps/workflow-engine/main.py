@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -48,6 +48,9 @@ from workflow_validation import validate_workflow, ValidationResult
 from confidence_scorer import get_confidence_scorer, calculate_confidence
 from safety_guardrails import get_safety_guardrails, init_safety_guardrails
 from auto_trigger import get_auto_trigger_manager, init_auto_trigger_manager
+
+# Phase 7A - Real-Time Event Bus
+from event_bus import get_event_bus, emit, EventType
 
 load_dotenv()
 
@@ -129,6 +132,112 @@ async def health_check():
         "version": "1.0.0",
         "database": db_status
     }
+
+
+# ============================================================
+# WEBSOCKET - REAL-TIME EVENTS (Phase 7A)
+# ============================================================
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, channels: str = "global"):
+    """
+    WebSocket endpoint for real-time event streaming.
+    
+    Query params:
+        channels: Comma-separated list of channels to subscribe to
+                  Default: "global"
+                  Examples: "global", "issues,alerts", "execution:abc123"
+    
+    Event Types:
+        - execution.* - Workflow execution events
+        - issue.* - Issue detection events
+        - remediation.* - Remediation events
+        - approval.* - Approval workflow events
+        - system.* - System health events
+    """
+    event_bus = get_event_bus()
+    channel_list = [c.strip() for c in channels.split(",") if c.strip()]
+    
+    await event_bus.connections.connect(websocket, channel_list)
+    
+    try:
+        while True:
+            # Handle incoming messages from client
+            data = await websocket.receive_json()
+            
+            # Handle subscribe/unsubscribe commands
+            if data.get("action") == "subscribe":
+                channel = data.get("channel")
+                if channel:
+                    await event_bus.connections.subscribe(websocket, channel)
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "channel": channel
+                    })
+            
+            elif data.get("action") == "unsubscribe":
+                channel = data.get("channel")
+                if channel:
+                    await event_bus.connections.unsubscribe(websocket, channel)
+                    await websocket.send_json({
+                        "type": "unsubscribed",
+                        "channel": channel
+                    })
+            
+            elif data.get("action") == "ping":
+                await websocket.send_json({"type": "pong"})
+            
+            elif data.get("action") == "get_history":
+                event_type = data.get("event_type")
+                channel = data.get("channel")
+                limit = data.get("limit", 50)
+                history = event_bus.get_history(event_type, channel, limit)
+                await websocket.send_json({
+                    "type": "history",
+                    "events": history
+                })
+    
+    except WebSocketDisconnect:
+        await event_bus.connections.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await event_bus.connections.disconnect(websocket)
+
+
+@app.get("/api/events/stats")
+async def get_event_stats():
+    """Get event bus statistics."""
+    event_bus = get_event_bus()
+    return event_bus.get_stats()
+
+
+@app.get("/api/events/history")
+async def get_event_history(
+    event_type: Optional[str] = None,
+    channel: Optional[str] = None,
+    limit: int = Query(50, le=200)
+):
+    """Get recent event history."""
+    event_bus = get_event_bus()
+    return {
+        "events": event_bus.get_history(event_type, channel, limit),
+        "total": len(event_bus.get_history())
+    }
+
+
+@app.post("/api/events/emit")
+async def emit_test_event(
+    event_type: str = "test.event",
+    message: str = "Test event",
+    channel: str = "global"
+):
+    """Emit a test event (for debugging)."""
+    event = await emit(
+        event_type,
+        {"message": message, "timestamp": datetime.now().isoformat()},
+        channel=channel
+    )
+    return {"success": True, "event_id": event.event_id}
 
 
 # ============================================================

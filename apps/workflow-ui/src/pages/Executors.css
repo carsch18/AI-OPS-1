@@ -1,0 +1,464 @@
+/**
+ * Executors Page Styles - MAANG-Grade Design
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE LAYOUT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.executors-page {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    color: #f8fafc;
+    padding: 24px 32px;
+    overflow-y: auto;
+}
+
+.executors-page.loading,
+.executors-page.error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.executors-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.executors-header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.executors-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+}
+
+.btn-refresh {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(71, 85, 105, 0.3);
+    border: 1px solid rgba(71, 85, 105, 0.4);
+    color: #94a3b8;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-refresh:hover {
+    background: rgba(71, 85, 105, 0.5);
+    color: #f8fafc;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEALTH BADGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.health-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.health-badge.healthy {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+}
+
+.health-badge.degraded {
+    background: rgba(234, 179, 8, 0.2);
+    color: #fbbf24;
+}
+
+.health-badge.unhealthy {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.health-badge.unknown {
+    background: rgba(71, 85, 105, 0.3);
+    color: #94a3b8;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXECUTOR CARDS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.executor-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.executor-card {
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(12px);
+    border: 2px solid rgba(71, 85, 105, 0.4);
+    border-radius: 12px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.executor-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.executor-card.selected {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.executor-card.ssh {
+    border-top: 4px solid #22c55e;
+}
+
+.executor-card.docker {
+    border-top: 4px solid #3b82f6;
+}
+
+.executor-card.api {
+    border-top: 4px solid #f59e0b;
+}
+
+.executor-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.executor-icon {
+    font-size: 1.75rem;
+}
+
+.executor-card-header h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.executor-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.executor-stats .stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px;
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 8px;
+}
+
+.executor-stats .stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.executor-stats .stat-label {
+    font-size: 0.7rem;
+    color: #64748b;
+    text-transform: capitalize;
+}
+
+.executor-latency {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(15, 23, 42, 0.3);
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+
+.latency-label {
+    color: #64748b;
+}
+
+.latency-value {
+    color: #f8fafc;
+    font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DETAIL PANEL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.executor-details {
+    margin-top: 24px;
+}
+
+.detail-panel {
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(71, 85, 105, 0.4);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.detail-panel h3 {
+    margin: 0 0 20px 0;
+    font-size: 1.25rem;
+    color: #f8fafc;
+}
+
+/* SSH Panel */
+.host-list,
+.container-list,
+.endpoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.host-item,
+.container-item,
+.endpoint-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(71, 85, 105, 0.3);
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.host-item:hover,
+.container-item:hover,
+.endpoint-item:hover {
+    border-color: rgba(139, 92, 246, 0.4);
+}
+
+.host-info,
+.container-info,
+.endpoint-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.host-alias,
+.container-name,
+.endpoint-name {
+    font-weight: 600;
+    color: #f8fafc;
+}
+
+.host-address,
+.container-image,
+.endpoint-url {
+    font-size: 0.8rem;
+    color: #64748b;
+    font-family: monospace;
+}
+
+.host-stats,
+.container-metrics,
+.endpoint-stats {
+    display: flex;
+    gap: 16px;
+}
+
+.host-stats .stat,
+.container-metrics .metric,
+.endpoint-stats .stat {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    padding: 4px 10px;
+    background: rgba(71, 85, 105, 0.3);
+    border-radius: 4px;
+}
+
+.host-actions,
+.container-actions,
+.endpoint-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-test,
+.btn-action {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-test {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: #60a5fa;
+}
+
+.btn-test:hover {
+    background: rgba(59, 130, 246, 0.2);
+}
+
+.btn-test:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Docker Panel */
+.container-status {
+    font-size: 1.5rem;
+}
+
+.container-actions .btn-action {
+    padding: 8px 12px;
+    background: rgba(71, 85, 105, 0.3);
+    border: 1px solid rgba(71, 85, 105, 0.4);
+    color: #94a3b8;
+}
+
+.container-actions .btn-action:hover {
+    background: rgba(71, 85, 105, 0.5);
+    color: #f8fafc;
+}
+
+.container-actions .btn-action.start {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.4);
+    color: #4ade80;
+}
+
+.container-actions .btn-action.stop {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #f87171;
+}
+
+/* API Panel */
+.endpoint-method {
+    min-width: 70px;
+}
+
+.method-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.method-badge.get {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+}
+
+.method-badge.post {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+.method-badge.put {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+}
+
+.method-badge.delete {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.method-badge.patch {
+    background: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(139, 92, 246, 0.3);
+    border-top-color: #8b5cf6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.loading-spinner.large {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 16px;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.empty-state.small {
+    text-align: center;
+    padding: 40px;
+    color: #64748b;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1024px) {
+    .executor-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .executors-page {
+        padding: 16px;
+    }
+
+    .executor-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .host-item,
+    .container-item,
+    .endpoint-item {
+        flex-wrap: wrap;
+    }
+
+    .host-actions,
+    .container-actions,
+    .endpoint-actions {
+        width: 100%;
+        justify-content: flex-end;
+        margin-top: 12px;
+    }
+}

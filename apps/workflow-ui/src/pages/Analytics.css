@@ -1,0 +1,500 @@
+/**
+ * Analytics Page Styles - Phase 7F
+ * MAANG-Grade Metrics Dashboard
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE LAYOUT
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.analytics-page {
+    padding: 24px;
+    min-height: 100vh;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%);
+}
+
+.analytics-page.loading,
+.analytics-page.error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loading-content,
+.error-content {
+    text-align: center;
+    color: #94a3b8;
+}
+
+.loading-spinner.large {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(139, 92, 246, 0.2);
+    border-top-color: #8b5cf6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.analytics-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.analytics-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin: 0;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.btn-refresh {
+    padding: 10px 20px;
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    border-radius: 8px;
+    color: #a78bfa;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-refresh:hover {
+    background: rgba(139, 92, 246, 0.3);
+    transform: translateY(-1px);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TIME RANGE SELECTOR
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.time-range-selector {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(30, 41, 59, 0.8);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.range-btn {
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #94a3b8;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.range-btn:hover {
+    color: #e2e8f0;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.range-btn.active {
+    background: #8b5cf6;
+    color: white;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OVERVIEW CARDS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.overview-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.metric-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px;
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.metric-icon {
+    font-size: 32px;
+    line-height: 1;
+}
+
+.metric-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.metric-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+.metric-label {
+    font-size: 12px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric-change {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.metric-change.positive {
+    color: #22c55e;
+}
+
+.metric-change.negative {
+    color: #ef4444;
+}
+
+/* Card Colors */
+.metric-card.green {
+    border-left: 4px solid #22c55e;
+}
+
+.metric-card.yellow {
+    border-left: 4px solid #eab308;
+}
+
+.metric-card.red {
+    border-left: 4px solid #ef4444;
+}
+
+.metric-card.blue {
+    border-left: 4px solid #3b82f6;
+}
+
+.metric-card.purple {
+    border-left: 4px solid #8b5cf6;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHARTS GRID
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.chart-card {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 20px;
+}
+
+.chart-card.wide {
+    grid-column: span 3;
+}
+
+.chart-card h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f1f5f9;
+    margin: 0 0 16px 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPARKLINE CHART
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sparkline-container {
+    display: flex;
+    gap: 40px;
+}
+
+.sparkline-item {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.sparkline-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: #94a3b8;
+    min-width: 60px;
+}
+
+.sparkline-chart {
+    flex: 1;
+    height: 40px;
+}
+
+.sparkline-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f1f5f9;
+    min-width: 60px;
+    text-align: right;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BAR CHART
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.bar-chart {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-around;
+    gap: 12px;
+    padding-top: 20px;
+}
+
+.bar-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.bar {
+    width: 100%;
+    max-width: 48px;
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 8px;
+    transition: all 0.3s ease;
+}
+
+.bar:hover {
+    filter: brightness(1.2);
+}
+
+.bar-value {
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+}
+
+.bar-label {
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: capitalize;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DONUT CHART
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.donut-chart {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.donut-chart svg {
+    width: 100%;
+    height: 100%;
+}
+
+.donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+}
+
+.legend-label {
+    color: #94a3b8;
+    text-transform: capitalize;
+    flex: 1;
+}
+
+.legend-value {
+    color: #f1f5f9;
+    font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WORKFLOW LIST
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.workflow-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.workflow-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.workflow-rank {
+    font-size: 14px;
+    font-weight: 700;
+    color: #8b5cf6;
+    width: 30px;
+}
+
+.workflow-name {
+    flex: 1;
+    font-size: 13px;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workflow-count {
+    font-size: 12px;
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EVENT FEED
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.event-feed h3 {
+    margin: 0 0 12px 0;
+}
+
+.event-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.event-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+.event-type {
+    color: #a78bfa;
+    font-weight: 500;
+    flex: 1;
+}
+
+.event-channel {
+    padding: 2px 6px;
+    background: rgba(139, 92, 246, 0.2);
+    border-radius: 4px;
+    color: #c4b5fd;
+    font-size: 11px;
+}
+
+.event-time {
+    color: #64748b;
+    font-size: 11px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1200px) {
+    .charts-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .chart-card.wide {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 768px) {
+    .analytics-page {
+        padding: 16px;
+    }
+
+    .analytics-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .header-right {
+        flex-wrap: wrap;
+    }
+
+    .overview-cards {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .charts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .chart-card.wide {
+        grid-column: span 1;
+    }
+
+    .sparkline-container {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .donut-chart {
+        flex-direction: column;
+    }
+}

@@ -1,0 +1,360 @@
+/**
+ * Command Center Styles
+ * 
+ * Modern, glass-morphism design with dark theme
+ */
+
+.command-center {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    color: #e2e8f0;
+    padding: 1rem;
+}
+
+/* Loading State */
+.command-center-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #0f172a;
+    color: #e2e8f0;
+}
+
+.loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 3px solid rgba(139, 92, 246, 0.3);
+    border-top-color: #8b5cf6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Header */
+.cc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    margin-bottom: 1.5rem;
+}
+
+.cc-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.cc-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.cc-header-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Connection Status */
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.connection-status.connected {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.connection-status.disconnected {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.connection-status.reconnecting {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Autonomous Toggle */
+.autonomous-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(30, 41, 59, 0.6);
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.autonomous-toggle:hover {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.autonomous-toggle.active {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.3) 0%, rgba(59, 130, 246, 0.3) 100%);
+    border-color: rgba(139, 92, 246, 0.5);
+    color: #e2e8f0;
+}
+
+.toggle-icon {
+    font-size: 1.25rem;
+}
+
+/* Notification Badges */
+.notification-badges {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-issue {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.badge-approval {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.badge-execution {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
+/* Grid Layout */
+.cc-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.cc-middle-row {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr 1fr;
+    gap: 1.5rem;
+}
+
+.cc-right-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+/* Panels */
+.cc-panel {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    padding: 1.25rem;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.cc-panel:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.cc-panel h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 1rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Issues Panel */
+.cc-issues {
+    min-height: 400px;
+}
+
+/* Executions Panel */
+.cc-executions {
+    min-height: 400px;
+}
+
+/* Health Panel */
+.cc-health {
+    flex: 1;
+}
+
+/* Actions Panel */
+.cc-actions {
+    flex: 1;
+}
+
+/* Bottom Row */
+.cc-bottom-row {
+    display: grid;
+    grid-template-columns: 1fr;
+}
+
+.cc-alerts {
+    min-height: 150px;
+}
+
+/* Alerts List */
+.alerts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.no-alerts {
+    color: #64748b;
+    text-align: center;
+    padding: 1rem;
+}
+
+.alert-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 8px;
+    border-left: 3px solid;
+}
+
+.alert-item.severity-critical {
+    border-left-color: #ef4444;
+}
+
+.alert-item.severity-high {
+    border-left-color: #f97316;
+}
+
+.alert-item.severity-medium {
+    border-left-color: #f59e0b;
+}
+
+.alert-item.severity-low {
+    border-left-color: #10b981;
+}
+
+.alert-time {
+    font-size: 0.75rem;
+    color: #64748b;
+    min-width: 80px;
+}
+
+.alert-title {
+    flex: 1;
+    font-size: 0.875rem;
+}
+
+.alert-severity {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.alert-severity.critical {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.alert-severity.high {
+    background: rgba(249, 115, 22, 0.2);
+    color: #f97316;
+}
+
+.alert-severity.medium {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.alert-severity.low {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+    .cc-middle-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .cc-right-column {
+        grid-column: span 2;
+        flex-direction: row;
+    }
+}
+
+@media (max-width: 768px) {
+    .cc-middle-row {
+        grid-template-columns: 1fr;
+    }
+
+    .cc-right-column {
+        grid-column: span 1;
+        flex-direction: column;
+    }
+
+    .cc-header {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .cc-header-left,
+    .cc-header-right {
+        width: 100%;
+        justify-content: center;
+    }
+}
