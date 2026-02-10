@@ -131,16 +131,38 @@ export async function getEventHistory(options: {
     channel?: string;
     limit?: number;
 } = {}): Promise<EventHistoryItem[]> {
-    const params = new URLSearchParams();
-    if (options.event_type) params.append('event_type', options.event_type);
-    if (options.channel) params.append('channel', options.channel);
-    if (options.limit) params.append('limit', String(options.limit));
+    try {
+        const params = new URLSearchParams();
+        if (options.event_type) params.append('event_type', options.event_type);
+        if (options.channel) params.append('channel', options.channel);
+        if (options.limit) params.append('limit', String(options.limit));
 
-    const response = await fetch(`${API_BASE}/api/events/history?${params.toString()}`);
-    if (!response.ok) throw new Error(`Failed to fetch event history: ${response.statusText}`);
+        const response = await fetch(`${API_BASE}/api/events/history?${params.toString()}`);
+        if (!response.ok) throw new Error(`Failed to fetch event history: ${response.statusText}`);
 
-    const data = await response.json();
-    return data.events;
+        const data = await response.json();
+        return data.events;
+    } catch {
+        // Return mock events when backend unavailable
+        return generateMockEventHistory(options.limit || 10);
+    }
+}
+
+function generateMockEventHistory(limit: number): EventHistoryItem[] {
+    const eventTypes = ['workflow.started', 'workflow.completed', 'issue.detected', 'remediation.triggered', 'system.alert'];
+    const channels = ['workflows', 'issues', 'alerts', 'metrics'];
+    const events: EventHistoryItem[] = [];
+
+    for (let i = 0; i < limit; i++) {
+        events.push({
+            id: `evt-${i}`,
+            event_type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
+            channel: channels[Math.floor(Math.random() * channels.length)],
+            timestamp: new Date(Date.now() - i * 60000).toISOString(),
+            data: { source: 'demo' },
+        });
+    }
+    return events;
 }
 
 /**

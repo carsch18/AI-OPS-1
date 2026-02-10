@@ -20,15 +20,31 @@ import {
 import type {
     RemediationWorkflow,
     WorkflowExecution,
-    WorkflowCategory,
 } from '../services/remediationApi';
 import {
-    getCategoryIcon,
-    getExecutionStatusIcon,
     getExecutionStatusColor,
     formatDuration,
     calculateWorkflowStats,
 } from '../services/remediationApi';
+import {
+    Wrench,
+    History,
+    FileText,
+    User,
+    BarChart3,
+    CheckCircle,
+    Clock,
+    Bot,
+    Play,
+    Copy,
+    Trash2,
+    Inbox,
+    X,
+    Loader2,
+    CategoryIcons,
+    ExecutionStatusIcons,
+    ICON_SIZE,
+} from '../components/Icons';
 import './Remediation.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -78,15 +94,18 @@ function CategoryFilter({ categories, selected, onChange }: CategoryFilterProps)
             >
                 All
             </button>
-            {categories.map(cat => (
-                <button
-                    key={cat}
-                    className={`category-btn ${selected === cat ? 'active' : ''}`}
-                    onClick={() => onChange(cat)}
-                >
-                    {getCategoryIcon(cat as WorkflowCategory)} {cat}
-                </button>
-            ))}
+            {categories.map(cat => {
+                const IconComp = CategoryIcons[cat as keyof typeof CategoryIcons] || FileText;
+                return (
+                    <button
+                        key={cat}
+                        className={`category-btn ${selected === cat ? 'active' : ''}`}
+                        onClick={() => onChange(cat)}
+                    >
+                        <IconComp size={14} /> {cat}
+                    </button>
+                );
+            })}
         </div>
     );
 }
@@ -105,9 +124,14 @@ function WorkflowCard({ workflow, onExecute, onClone, onDelete, executing }: Wor
     return (
         <div className={`workflow-card ${workflow.workflow_type}`}>
             <div className="workflow-card-header">
-                <span className="workflow-icon">{getCategoryIcon(metadata.category)}</span>
+                <span className="workflow-icon">
+                    {(() => {
+                        const IconComp = CategoryIcons[metadata.category as keyof typeof CategoryIcons] || FileText;
+                        return <IconComp size={ICON_SIZE.lg} />;
+                    })()}
+                </span>
                 <div className="workflow-type-badge">
-                    {workflow.workflow_type === 'system' ? '📋 System' : '👤 Custom'}
+                    {workflow.workflow_type === 'system' ? <><FileText size={14} /> System</> : <><User size={14} /> Custom</>}
                 </div>
             </div>
 
@@ -117,15 +141,15 @@ function WorkflowCard({ workflow, onExecute, onClone, onDelete, executing }: Wor
 
                 <div className="workflow-meta">
                     <span className="meta-item">
-                        <span className="meta-icon">📊</span>
+                        <BarChart3 size={14} className="meta-icon" />
                         {metadata.execution_count} runs
                     </span>
                     <span className="meta-item">
-                        <span className="meta-icon">✅</span>
+                        <CheckCircle size={14} className="meta-icon" />
                         {Math.round(metadata.success_rate * 100)}% success
                     </span>
                     <span className="meta-item">
-                        <span className="meta-icon">⏱️</span>
+                        <Clock size={14} className="meta-icon" />
                         ~{formatDuration(metadata.estimated_duration_seconds)}
                     </span>
                 </div>
@@ -140,7 +164,7 @@ function WorkflowCard({ workflow, onExecute, onClone, onDelete, executing }: Wor
 
                 {metadata.auto_trigger_enabled && (
                     <div className="auto-trigger-badge">
-                        🤖 Auto-Trigger Enabled
+                        <Bot size={14} /> Auto-Trigger Enabled
                     </div>
                 )}
             </div>
@@ -151,20 +175,20 @@ function WorkflowCard({ workflow, onExecute, onClone, onDelete, executing }: Wor
                     onClick={() => onExecute(workflow.id)}
                     disabled={executing}
                 >
-                    {executing ? '⏳' : '▶️'} Execute
+                    {executing ? <Loader2 size={14} className="spin" /> : <Play size={14} />} Execute
                 </button>
                 <button
                     className="btn-action clone"
                     onClick={() => onClone(workflow.id)}
                 >
-                    📋 Clone
+                    <Copy size={14} /> Clone
                 </button>
                 {workflow.workflow_type === 'user' && (
                     <button
                         className="btn-action delete"
                         onClick={() => onDelete(workflow.id)}
                     >
-                        🗑️
+                        <Trash2 size={14} />
                     </button>
                 )}
             </div>
@@ -182,14 +206,14 @@ function ExecutionHistoryModal({ executions, onClose }: ExecutionHistoryModalPro
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content execution-history-modal" onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                    <h2>📜 Execution History</h2>
-                    <button className="modal-close" onClick={onClose}>✕</button>
+                    <h2><History size={20} /> Execution History</h2>
+                    <button className="modal-close" onClick={onClose}><X size={18} /></button>
                 </div>
 
                 <div className="modal-body">
                     {executions.length === 0 ? (
                         <div className="empty-state">
-                            <span className="empty-icon">📭</span>
+                            <Inbox size={48} className="empty-icon" />
                             <p>No executions yet</p>
                         </div>
                     ) : (
@@ -197,7 +221,10 @@ function ExecutionHistoryModal({ executions, onClose }: ExecutionHistoryModalPro
                             {executions.map(exec => (
                                 <div key={exec.execution_id} className={`execution-item ${exec.status}`}>
                                     <div className="execution-status">
-                                        {getExecutionStatusIcon(exec.status)}
+                                        {(() => {
+                                            const IconComp = ExecutionStatusIcons[exec.status as keyof typeof ExecutionStatusIcons] || Clock;
+                                            return <IconComp size={18} />;
+                                        })()}
                                     </div>
                                     <div className="execution-info">
                                         <span className="execution-name">{exec.workflow_name}</span>
@@ -356,11 +383,11 @@ export default function RemediationPage() {
             {/* Header */}
             <header className="remediation-header">
                 <div className="header-left">
-                    <h1>🔧 Remediation Library</h1>
+                    <h1><Wrench size={24} /> Remediation Library</h1>
                 </div>
                 <div className="header-right">
                     <button className="btn-history" onClick={() => setShowHistory(true)}>
-                        📜 History ({executions.filter(e => e.status === 'running').length} running)
+                        <History size={16} /> History ({executions.filter(e => e.status === 'running').length} running)
                     </button>
                 </div>
             </header>
@@ -381,7 +408,7 @@ export default function RemediationPage() {
                         className={`tab ${workflowType === 'system' ? 'active' : ''}`}
                         onClick={() => setWorkflowType('system')}
                     >
-                        📋 System Templates
+                        <FileText size={14} /> System Templates
                     </button>
                     <button
                         className={`tab ${workflowType === 'user' ? 'active' : ''}`}
@@ -402,7 +429,7 @@ export default function RemediationPage() {
             <div className="workflows-content">
                 {filteredWorkflows.length === 0 ? (
                     <div className="empty-state">
-                        <span className="empty-icon">📭</span>
+                        <Inbox size={48} className="empty-icon" />
                         <h2>No Workflows Found</h2>
                         <p>No workflows match your current filters.</p>
                     </div>

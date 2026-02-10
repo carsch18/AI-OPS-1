@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import {
     getDashboardOverview,
     getEventHistory,
@@ -23,6 +24,23 @@ import type {
     TimeRange,
 } from '../services/analyticsApi';
 import { formatPercent, getMetricColor } from '../services/analyticsApi';
+import {
+    LayoutDashboard,
+    Cpu,
+    MemoryStick,
+    FileText,
+    CheckCircle,
+    Flame,
+    Zap,
+    Activity,
+    Radio,
+    BarChart3,
+    FolderOpen,
+    RefreshCw,
+    TrendingUp,
+    TrendingDown,
+    AlertTriangle,
+} from '../components/Icons';
 import './Analytics.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -30,7 +48,7 @@ import './Analytics.css';
 // ═══════════════════════════════════════════════════════════════════════════
 
 interface MetricCardProps {
-    icon: string;
+    icon: ReactNode;
     label: string;
     value: string | number;
     change?: number;
@@ -46,7 +64,7 @@ function MetricCard({ icon, label, value, change, color = 'blue' }: MetricCardPr
                 <span className="metric-label">{label}</span>
                 {change !== undefined && (
                     <span className={`metric-change ${change >= 0 ? 'positive' : 'negative'}`}>
-                        {change >= 0 ? '↑' : '↓'} {Math.abs(change).toFixed(1)}%
+                        {change >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />} {Math.abs(change).toFixed(1)}%
                     </span>
                 )}
             </div>
@@ -203,7 +221,7 @@ interface EventFeedProps {
 function EventFeed({ events }: EventFeedProps) {
     return (
         <div className="event-feed">
-            <h3>📡 Live Events</h3>
+            <h3><Radio size={18} /> Live Events</h3>
             <div className="event-list">
                 {events.slice(0, 10).map(event => (
                     <div key={event.id} className="event-item">
@@ -237,11 +255,53 @@ export default function AnalyticsPage() {
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
+
+            // Default fallback data
+            const defaultOverview: DashboardOverview = {
+                system: {
+                    timestamp: new Date().toISOString(),
+                    cpu_usage: 0,
+                    memory_usage: 0,
+                    disk_usage: 0,
+                    network_in_mbps: 0,
+                    network_out_mbps: 0,
+                    active_connections: 0,
+                },
+                executions: {
+                    total_executions: 0,
+                    successful_executions: 0,
+                    failed_executions: 0,
+                    avg_duration_ms: 0,
+                    executions_by_hour: [],
+                    executions_by_status: [],
+                },
+                issues: {
+                    total_detected: 0,
+                    total_resolved: 0,
+                    avg_resolution_ms: 0,
+                    by_severity: [],
+                    by_category: [],
+                    resolution_trend: [],
+                },
+                events: {
+                    total_events: 0,
+                    events_per_minute: 0,
+                    by_type: {},
+                    by_channel: {},
+                },
+                workflows: {
+                    total_workflows: 0,
+                    active_workflows: 0,
+                    by_trigger_type: {},
+                    most_executed: [],
+                },
+            };
+
             const [ov, ev, cpu, mem] = await Promise.all([
-                getDashboardOverview(),
+                getDashboardOverview().catch(() => defaultOverview),
                 getEventHistory({ limit: 50 }).catch(() => []),
-                getTimeSeriesMetrics('cpu', timeRange),
-                getTimeSeriesMetrics('memory', timeRange),
+                getTimeSeriesMetrics('cpu', timeRange).catch(() => []),
+                getTimeSeriesMetrics('memory', timeRange).catch(() => []),
             ]);
 
             setOverview(ov);
@@ -283,7 +343,7 @@ export default function AnalyticsPage() {
         return (
             <div className="analytics-page error">
                 <div className="error-content">
-                    <span className="error-icon">⚠️</span>
+                    <span className="error-icon"><AlertTriangle size={48} /></span>
                     <h2>Failed to Load</h2>
                     <p>{error}</p>
                     <button onClick={fetchData}>Retry</button>
@@ -299,12 +359,12 @@ export default function AnalyticsPage() {
             {/* Header */}
             <header className="analytics-header">
                 <div className="header-left">
-                    <h1>📊 Analytics Dashboard</h1>
+                    <h1><LayoutDashboard size={24} /> Analytics Dashboard</h1>
                 </div>
                 <div className="header-right">
                     <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
                     <button className="btn-refresh" onClick={fetchData}>
-                        🔄 Refresh
+                        <RefreshCw size={16} /> Refresh
                     </button>
                 </div>
             </header>
@@ -312,38 +372,38 @@ export default function AnalyticsPage() {
             {/* Overview Cards */}
             <div className="overview-cards">
                 <MetricCard
-                    icon="🖥️"
+                    icon={<Cpu size={24} />}
                     label="CPU Usage"
                     value={formatPercent(system.cpu_usage)}
                     color={getMetricColor(system.cpu_usage, { warn: 70, critical: 90 })}
                 />
                 <MetricCard
-                    icon="🧠"
+                    icon={<MemoryStick size={24} />}
                     label="Memory Usage"
                     value={formatPercent(system.memory_usage)}
                     color={getMetricColor(system.memory_usage, { warn: 75, critical: 90 })}
                 />
                 <MetricCard
-                    icon="📋"
+                    icon={<FileText size={24} />}
                     label="Total Executions"
                     value={executions.total_executions.toLocaleString()}
                     change={5.2}
                     color="purple"
                 />
                 <MetricCard
-                    icon="✅"
+                    icon={<CheckCircle size={24} />}
                     label="Success Rate"
                     value={formatPercent((executions.successful_executions / executions.total_executions) * 100)}
                     color="green"
                 />
                 <MetricCard
-                    icon="🔥"
+                    icon={<Flame size={24} />}
                     label="Active Issues"
                     value={issues.total_detected - issues.total_resolved}
                     color={issues.total_detected - issues.total_resolved > 10 ? 'red' : 'yellow'}
                 />
                 <MetricCard
-                    icon="⚡"
+                    icon={<Zap size={24} />}
                     label="Events/min"
                     value={eventStats.events_per_minute}
                     color="blue"
@@ -354,7 +414,7 @@ export default function AnalyticsPage() {
             <div className="charts-grid">
                 {/* CPU & Memory Sparklines */}
                 <div className="chart-card wide">
-                    <h3>🖥️ System Performance</h3>
+                    <h3><Activity size={18} /> System Performance</h3>
                     <div className="sparkline-container">
                         <div className="sparkline-item">
                             <span className="sparkline-label">CPU</span>
@@ -371,7 +431,7 @@ export default function AnalyticsPage() {
 
                 {/* Execution by Status */}
                 <div className="chart-card">
-                    <h3>📋 Execution Status</h3>
+                    <h3><BarChart3 size={18} /> Execution Status</h3>
                     <DonutChart
                         data={executions.executions_by_status.map(s => ({
                             label: s.status,
@@ -384,7 +444,7 @@ export default function AnalyticsPage() {
 
                 {/* Issues by Severity */}
                 <div className="chart-card">
-                    <h3>🔥 Issues by Severity</h3>
+                    <h3><Flame size={18} /> Issues by Severity</h3>
                     <BarChart
                         data={issues.by_severity.map(s => ({
                             label: s.severity,
@@ -398,7 +458,7 @@ export default function AnalyticsPage() {
 
                 {/* Issues by Category */}
                 <div className="chart-card">
-                    <h3>📁 Issues by Category</h3>
+                    <h3><FolderOpen size={18} /> Issues by Category</h3>
                     <BarChart
                         data={issues.by_category.slice(0, 5).map(c => ({
                             label: c.category.substring(0, 8),
@@ -410,7 +470,7 @@ export default function AnalyticsPage() {
 
                 {/* Workflows */}
                 <div className="chart-card">
-                    <h3>⚡ Top Workflows</h3>
+                    <h3><Zap size={18} /> Top Workflows</h3>
                     <div className="workflow-list">
                         {workflows.most_executed.map((wf, i) => (
                             <div key={wf.workflow_id} className="workflow-item">

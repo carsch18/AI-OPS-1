@@ -22,6 +22,21 @@ import {
     formatAge,
     formatTimestamp,
 } from '../services/issueApi';
+import {
+    Search,
+    Radar,
+    Monitor,
+    Clock,
+    Eye,
+    Bot,
+    Play,
+    CheckCircle,
+    FileText,
+    AlertTriangle,
+    PartyPopper,
+    Loader2,
+    Lightbulb,
+} from '../components/Icons';
 import './Issues.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -74,12 +89,12 @@ function IssueStatsBar({ stats, onRunDetection, detecting }: IssueStatsBarProps)
                 >
                     {detecting ? (
                         <>
-                            <span className="spinner" />
+                            <Loader2 size={16} className="spin" />
                             Detecting...
                         </>
                     ) : (
                         <>
-                            🔍 Run Detection
+                            <Radar size={16} /> Run Detection
                         </>
                     )}
                 </button>
@@ -116,7 +131,7 @@ function IssueFiltersBar({
     return (
         <div className="issue-filters-bar">
             <div className="search-box">
-                <span className="search-icon">🔎</span>
+                <span className="search-icon"><Search size={16} /></span>
                 <input
                     type="text"
                     placeholder="Search issues..."
@@ -216,7 +231,7 @@ function IssueCard({ issue, onSelect, onAcknowledge, onExecute, onResolve, isSel
 
                 <div className="issue-meta">
                     <span className="meta-item host">
-                        <span className="meta-icon">🖥️</span>
+                        <span className="meta-icon"><Monitor size={14} /></span>
                         {issue.host}
                     </span>
                     <span className="meta-item category">
@@ -224,7 +239,7 @@ function IssueCard({ issue, onSelect, onAcknowledge, onExecute, onResolve, isSel
                         {issue.category}
                     </span>
                     <span className="meta-item time">
-                        <span className="meta-icon">⏱️</span>
+                        <span className="meta-icon"><Clock size={14} /></span>
                         {formatAge(issue.age_seconds)}
                     </span>
                 </div>
@@ -242,7 +257,7 @@ function IssueCard({ issue, onSelect, onAcknowledge, onExecute, onResolve, isSel
                         className="btn-action acknowledge"
                         onClick={() => onAcknowledge(issue.id)}
                     >
-                        👁️ Acknowledge
+                        <Eye size={14} /> Acknowledge
                     </button>
                 )}
 
@@ -251,7 +266,7 @@ function IssueCard({ issue, onSelect, onAcknowledge, onExecute, onResolve, isSel
                         className="btn-action execute"
                         onClick={() => onExecute(issue.id)}
                     >
-                        {issue.auto_remediate ? '🤖 Auto-Fix' : '▶️ Execute'}
+                        {issue.auto_remediate ? <><Bot size={14} /> Auto-Fix</> : <><Play size={14} /> Execute</>}
                     </button>
                 )}
 
@@ -260,7 +275,7 @@ function IssueCard({ issue, onSelect, onAcknowledge, onExecute, onResolve, isSel
                         className="btn-action resolve"
                         onClick={() => onResolve(issue.id)}
                     >
-                        ✅ Resolve
+                        <CheckCircle size={14} /> Resolve
                     </button>
                 )}
             </div>
@@ -375,9 +390,9 @@ function IssueDetailModal({
 
                     {issue.suggested_workflow_id && (
                         <div className="modal-section">
-                            <h3>💡 Suggested Remediation</h3>
+                            <h3><Lightbulb size={16} /> Suggested Remediation</h3>
                             <div className="suggested-workflow">
-                                <span className="workflow-icon">📋</span>
+                                <span className="workflow-icon"><FileText size={16} /></span>
                                 <span className="workflow-id">{issue.suggested_workflow_id}</span>
                                 {issue.auto_remediate && (
                                     <span className="auto-badge">Auto-Remediate Available</span>
@@ -393,7 +408,7 @@ function IssueDetailModal({
                             className="btn-modal acknowledge"
                             onClick={() => onAcknowledge(issue.id)}
                         >
-                            👁️ Acknowledge
+                            <Eye size={14} /> Acknowledge
                         </button>
                     )}
 
@@ -402,7 +417,7 @@ function IssueDetailModal({
                             className="btn-modal auto-remediate"
                             onClick={() => onAutoRemediate(issue.id)}
                         >
-                            🤖 Auto-Remediate
+                            <Bot size={14} /> Auto-Remediate
                         </button>
                     )}
 
@@ -411,7 +426,7 @@ function IssueDetailModal({
                             className="btn-modal execute"
                             onClick={() => onExecute(issue.id)}
                         >
-                            ▶️ Execute Workflow
+                            <Play size={14} /> Execute Workflow
                         </button>
                     )}
 
@@ -420,7 +435,7 @@ function IssueDetailModal({
                             className="btn-modal resolve"
                             onClick={() => onResolve(issue.id)}
                         >
-                            ✅ Mark Resolved
+                            <CheckCircle size={14} /> Mark Resolved
                         </button>
                     )}
 
@@ -533,7 +548,7 @@ export default function IssuesPage() {
         return (
             <div className="issues-page error">
                 <div className="error-content">
-                    <span className="error-icon">⚠️</span>
+                    <span className="error-icon"><AlertTriangle size={48} /></span>
                     <h2>Failed to Load Issues</h2>
                     <p>{error}</p>
                     <button onClick={handleRunDetection}>Try Again</button>
@@ -547,7 +562,7 @@ export default function IssuesPage() {
             {/* Header */}
             <header className="issues-header">
                 <div className="header-left">
-                    <h1>🔍 Issue Detection</h1>
+                    <h1><Radar size={24} /> Issue Detection</h1>
                     {refreshing && <span className="refreshing-badge">Refreshing...</span>}
                 </div>
             </header>
@@ -577,7 +592,7 @@ export default function IssuesPage() {
             <div className="issues-content">
                 {filteredIssues.length === 0 ? (
                     <div className="empty-state">
-                        <span className="empty-icon">🎉</span>
+                        <span className="empty-icon"><PartyPopper size={64} color="#10b981" /></span>
                         <h2>{hasFilters ? 'No Matching Issues' : 'All Clear!'}</h2>
                         <p>
                             {hasFilters

@@ -13,6 +13,7 @@ import ActiveExecutions from '../components/dashboard/ActiveExecutions';
 import HealthOverview from '../components/dashboard/HealthOverview';
 import QuickActions from '../components/dashboard/QuickActions';
 import MetricsGrid from '../components/dashboard/MetricsGrid';
+import { LayoutDashboard, Bot, User } from '../components/Icons';
 import './CommandCenter.css';
 
 // API client
@@ -166,7 +167,7 @@ export default function CommandCenter() {
             {/* Header */}
             <header className="cc-header">
                 <div className="cc-header-left">
-                    <h1>🎮 Command Center</h1>
+                    <h1><LayoutDashboard size={24} /> Command Center</h1>
                     <div className={`connection-status ${connectionState}`}>
                         <span className="status-dot"></span>
                         {connectionState === 'connected' ? 'Live' : connectionState}
@@ -179,7 +180,7 @@ export default function CommandCenter() {
                         className={`autonomous-toggle ${autonomousMode ? 'active' : ''}`}
                         onClick={toggleAutonomousMode}
                     >
-                        <span className="toggle-icon">{autonomousMode ? '🤖' : '👤'}</span>
+                        <span className="toggle-icon">{autonomousMode ? <Bot size={18} /> : <User size={18} />}</span>
                         <span className="toggle-label">
                             {autonomousMode ? 'Autonomous ON' : 'Manual Mode'}
                         </span>

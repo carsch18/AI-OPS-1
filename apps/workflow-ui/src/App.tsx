@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import type { Node } from 'reactflow';
 
@@ -34,24 +35,36 @@ import { ToastProvider, ToastContainer, EventToastBridge } from './components/To
 import { PageErrorBoundary } from './components/ErrorBoundary';
 import './components/ErrorBoundary.css';
 
+// Icons
+import {
+  Zap,
+  LayoutDashboard,
+  Workflow,
+  Flame,
+  Wrench,
+  Terminal,
+  BarChart3,
+  Settings,
+} from './components/Icons';
+
 import './index.css';
 
 // Sidebar Navigation Component
 function Sidebar() {
 
-  const navItems = [
-    { path: '/', icon: '🎮', label: 'Command Center' },
-    { path: '/workflows', icon: '📋', label: 'Workflows' },
-    { path: '/issues', icon: '🔥', label: 'Issues', badge: 0 },
-    { path: '/remediation', icon: '🔧', label: 'Remediation' },
-    { path: '/executors', icon: '💻', label: 'Executors' },
-    { path: '/analytics', icon: '📊', label: 'Analytics' },
+  const navItems: { path: string; icon: ReactNode; label: string; badge?: number }[] = [
+    { path: '/', icon: <LayoutDashboard size={18} />, label: 'Command Center' },
+    { path: '/workflows', icon: <Workflow size={18} />, label: 'Workflows' },
+    { path: '/issues', icon: <Flame size={18} />, label: 'Issues', badge: 0 },
+    { path: '/remediation', icon: <Wrench size={18} />, label: 'Remediation' },
+    { path: '/executors', icon: <Terminal size={18} />, label: 'Executors' },
+    { path: '/analytics', icon: <BarChart3 size={18} />, label: 'Analytics' },
   ];
 
   return (
     <nav className="sidebar">
       <div className="sidebar-logo">
-        <span className="logo-icon">⚡</span>
+        <span className="logo-icon"><Zap size={24} /></span>
         <span className="logo-text">AIOps</span>
       </div>
 
@@ -73,7 +86,7 @@ function Sidebar() {
 
       <div className="sidebar-footer">
         <NavLink to="/settings" className="nav-item settings">
-          <span className="nav-icon">⚙️</span>
+          <span className="nav-icon"><Settings size={18} /></span>
           <span className="nav-label">Settings</span>
         </NavLink>
       </div>

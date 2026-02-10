@@ -3,19 +3,39 @@
  */
 
 import { useState } from 'react';
+import {
+    Zap,
+    Search,
+    Activity,
+    Power,
+    RefreshCw,
+    CheckCircle,
+    XCircle,
+    Loader2,
+} from '../Icons';
 import './Dashboard.css';
 
 const API_BASE = 'http://localhost:8001';
 
+interface ActionItem {
+    id: string;
+    label: string;
+    icon: React.ReactNode;
+    description: string;
+    endpoint: string;
+    method: string;
+    danger?: boolean;
+}
+
 export default function QuickActions() {
     const [loading, setLoading] = useState<string | null>(null);
-    const [lastAction, setLastAction] = useState<string | null>(null);
+    const [lastAction, setLastAction] = useState<{ success: boolean; message: string } | null>(null);
 
-    const actions = [
+    const actions: ActionItem[] = [
         {
             id: 'detect',
             label: 'Run Detection',
-            icon: '🔍',
+            icon: <Search size={18} />,
             description: 'Trigger issue detection',
             endpoint: '/api/issues/detect',
             method: 'POST',
@@ -23,7 +43,7 @@ export default function QuickActions() {
         {
             id: 'health',
             label: 'Health Check',
-            icon: '🏥',
+            icon: <Activity size={18} />,
             description: 'Run system health check',
             endpoint: '/health',
             method: 'GET',
@@ -31,7 +51,7 @@ export default function QuickActions() {
         {
             id: 'kill-switch',
             label: 'Kill Switch',
-            icon: '🛑',
+            icon: <Power size={18} />,
             description: 'Emergency stop all',
             endpoint: '/api/autonomous/kill-switch',
             method: 'POST',
@@ -40,14 +60,14 @@ export default function QuickActions() {
         {
             id: 'reload',
             label: 'Reload Triggers',
-            icon: '🔄',
+            icon: <RefreshCw size={18} />,
             description: 'Reload trigger configs',
             endpoint: '/api/trigger/reload',
             method: 'POST',
         },
     ];
 
-    async function executeAction(action: typeof actions[0]) {
+    async function executeAction(action: ActionItem) {
         setLoading(action.id);
         try {
             const response = await fetch(`${API_BASE}${action.endpoint}`, {
@@ -56,12 +76,12 @@ export default function QuickActions() {
             });
 
             if (response.ok) {
-                setLastAction(`✅ ${action.label} completed`);
+                setLastAction({ success: true, message: `${action.label} completed` });
             } else {
-                setLastAction(`❌ ${action.label} failed`);
+                setLastAction({ success: false, message: `${action.label} failed` });
             }
         } catch (error) {
-            setLastAction(`❌ ${action.label} error`);
+            setLastAction({ success: false, message: `${action.label} error` });
         } finally {
             setLoading(null);
             setTimeout(() => setLastAction(null), 3000);
@@ -70,7 +90,7 @@ export default function QuickActions() {
 
     return (
         <div className="quick-actions">
-            <h3>⚡ Quick Actions</h3>
+            <h3><Zap size={18} /> Quick Actions</h3>
 
             <div className="actions-grid">
                 {actions.map(action => (
@@ -81,15 +101,18 @@ export default function QuickActions() {
                         disabled={loading !== null}
                         title={action.description}
                     >
-                        <span className="action-icon">{action.icon}</span>
+                        <span className="action-icon">
+                            {loading === action.id ? <Loader2 size={18} className="spin" /> : action.icon}
+                        </span>
                         <span className="action-label">{action.label}</span>
                     </button>
                 ))}
             </div>
 
             {lastAction && (
-                <div className="action-feedback">
-                    {lastAction}
+                <div className={`action-feedback ${lastAction.success ? 'success' : 'error'}`}>
+                    {lastAction.success ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                    {lastAction.message}
                 </div>
             )}
         </div>

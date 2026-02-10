@@ -2,6 +2,18 @@
  * Health Overview - System health status panel
  */
 
+import type { ReactNode } from 'react';
+import {
+    Activity,
+    Globe,
+    Database,
+    Container,
+    Terminal,
+    CheckCircle,
+    XCircle,
+    Loader2,
+    HelpCircle,
+} from '../Icons';
 import './Dashboard.css';
 
 interface SystemHealth {
@@ -25,20 +37,20 @@ export default function HealthOverview({ health }: HealthOverviewProps) {
         }
     };
 
-    const getStatusIcon = (status: string) => {
+    const getStatusIcon = (status: string): ReactNode => {
         switch (status) {
-            case 'healthy': return '✓';
-            case 'unhealthy': return '✗';
-            case 'checking': return '⟳';
-            default: return '?';
+            case 'healthy': return <CheckCircle size={14} />;
+            case 'unhealthy': return <XCircle size={14} />;
+            case 'checking': return <Loader2 size={14} className="spin" />;
+            default: return <HelpCircle size={14} />;
         }
     };
 
-    const services = [
-        { key: 'api', label: 'API Server', icon: '🌐', status: health.api },
-        { key: 'database', label: 'Database', icon: '🗄️', status: health.database },
-        { key: 'docker', label: 'Docker', icon: '🐳', status: health.docker },
-        { key: 'ssh', label: 'SSH', icon: '💻', status: health.ssh },
+    const services: { key: string; label: string; icon: ReactNode; status: string }[] = [
+        { key: 'api', label: 'API Server', icon: <Globe size={20} />, status: health.api },
+        { key: 'database', label: 'Database', icon: <Database size={20} />, status: health.database },
+        { key: 'docker', label: 'Docker', icon: <Container size={20} />, status: health.docker },
+        { key: 'ssh', label: 'SSH', icon: <Terminal size={20} />, status: health.ssh },
     ];
 
     const healthyCount = services.filter(s => s.status === 'healthy').length;
@@ -48,7 +60,7 @@ export default function HealthOverview({ health }: HealthOverviewProps) {
 
     return (
         <div className="health-overview">
-            <h3>🏥 System Health</h3>
+            <h3><Activity size={18} /> System Health</h3>
 
             <div className="health-summary">
                 <div
@@ -73,7 +85,7 @@ export default function HealthOverview({ health }: HealthOverviewProps) {
                         className={`health-item ${service.status}`}
                     >
                         <div className="health-icon-row">
-                            <span className="service-icon">{service.icon}</span>
+                            <span className="service-icon" style={{ color: getStatusColor(service.status) }}>{service.icon}</span>
                             <span
                                 className="status-badge"
                                 style={{

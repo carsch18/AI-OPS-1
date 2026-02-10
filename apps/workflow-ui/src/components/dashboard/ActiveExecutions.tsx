@@ -4,6 +4,16 @@
 
 import type { WebSocketEvent } from '../../hooks/useWebSocket';
 import { EventTypes } from '../../hooks/useRealtimeEvents';
+import {
+    Zap,
+    Play,
+    CheckCircle,
+    XCircle,
+    Pause,
+    RotateCw,
+    FileText,
+    Moon,
+} from '../Icons';
 import './Dashboard.css';
 
 interface ActiveExecutionsProps {
@@ -89,20 +99,20 @@ export default function ActiveExecutions({ executions }: ActiveExecutionsProps) 
 
     const getStatusIcon = (status: string) => {
         switch (status) {
-            case 'running': return '▶️';
-            case 'completed': return '✅';
-            case 'failed': return '❌';
-            default: return '⏸️';
+            case 'running': return <Play size={16} color="#3b82f6" />;
+            case 'completed': return <CheckCircle size={16} color="#10b981" />;
+            case 'failed': return <XCircle size={16} color="#ef4444" />;
+            default: return <Pause size={16} color="#6b7280" />;
         }
     };
 
     return (
         <div className="active-executions">
-            <h3>⚡ Active Executions</h3>
+            <h3><Zap size={18} /> Active Executions</h3>
 
             {activeExecutions.length === 0 && recentCompleted.length === 0 ? (
                 <div className="empty-state">
-                    <span className="empty-icon">💤</span>
+                    <span className="empty-icon"><Moon size={48} color="#6b7280" /></span>
                     <p>No active executions</p>
                     <span className="empty-subtitle">Workflows will appear here when running</span>
                 </div>
@@ -111,7 +121,7 @@ export default function ActiveExecutions({ executions }: ActiveExecutionsProps) 
                     {/* Active Executions */}
                     {activeExecutions.length > 0 && (
                         <div className="execution-section">
-                            <h4>🔄 Running</h4>
+                            <h4><RotateCw size={16} /> Running</h4>
                             <div className="execution-list">
                                 {activeExecutions.map(exec => (
                                     <div key={exec.id} className="execution-card running">
@@ -150,7 +160,7 @@ export default function ActiveExecutions({ executions }: ActiveExecutionsProps) 
                     {/* Recent Completed */}
                     {recentCompleted.length > 0 && (
                         <div className="execution-section">
-                            <h4>📋 Recent</h4>
+                            <h4><FileText size={16} /> Recent</h4>
                             <div className="execution-list mini">
                                 {recentCompleted.map(exec => (
                                     <div key={exec.id} className={`execution-card mini ${exec.status}`}>

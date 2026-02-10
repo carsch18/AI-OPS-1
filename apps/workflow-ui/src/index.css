@@ -23,6 +23,31 @@
   --accent-red-glow: rgba(239, 68, 68, 0.3);
   --accent-cyan: #06b6d4;
 
+  /* Enterprise Status Colors - Psychological Color System */
+  --status-critical: #DC2626;
+  --status-critical-bg: rgba(220, 38, 38, 0.15);
+  --status-critical-border: rgba(220, 38, 38, 0.4);
+
+  --status-warning: #F59E0B;
+  --status-warning-bg: rgba(245, 158, 11, 0.15);
+  --status-warning-border: rgba(245, 158, 11, 0.4);
+
+  --status-success: #10B981;
+  --status-success-bg: rgba(16, 185, 129, 0.15);
+  --status-success-border: rgba(16, 185, 129, 0.4);
+
+  --status-info: #3B82F6;
+  --status-info-bg: rgba(59, 130, 246, 0.15);
+  --status-info-border: rgba(59, 130, 246, 0.4);
+
+  --status-neutral: #64748B;
+  --status-neutral-bg: rgba(100, 116, 139, 0.15);
+  --status-neutral-border: rgba(100, 116, 139, 0.4);
+
+  --status-active: #8B5CF6;
+  --status-active-bg: rgba(139, 92, 246, 0.15);
+  --status-active-border: rgba(139, 92, 246, 0.4);
+
   /* Text Colors */
   --text-primary: #ffffff;
   --text-secondary: #a3a3a3;

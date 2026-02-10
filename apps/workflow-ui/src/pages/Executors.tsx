@@ -28,11 +28,27 @@ import type {
     ExecutorStatus,
 } from '../services/executorApi';
 import {
-    getExecutorIcon,
-    getStatusIcon,
-    getContainerStatusIcon,
     calculateOverallHealth,
 } from '../services/executorApi';
+import {
+    Terminal,
+    Key,
+    Container,
+    Globe,
+    RefreshCw,
+    CheckCircle,
+    XCircle,
+    Play,
+    Square,
+    RotateCw,
+    Plug,
+    Loader2,
+    HelpCircle,
+    HealthStatusIcons,
+    ExecutorTypeIcons,
+    ContainerStatusIcons,
+    ICON_SIZE,
+} from '../components/Icons';
 import './Executors.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -44,9 +60,10 @@ interface HealthBadgeProps {
 }
 
 function HealthBadge({ status }: HealthBadgeProps) {
+    const IconComp = HealthStatusIcons[status as keyof typeof HealthStatusIcons] || HelpCircle;
     return (
         <span className={`health-badge ${status}`}>
-            {getStatusIcon(status)} {status}
+            <IconComp size={14} /> {status}
         </span>
     );
 }
@@ -61,10 +78,11 @@ interface ExecutorCardProps {
 }
 
 function ExecutorCard({ type, name, health, stats, onClick, selected }: ExecutorCardProps) {
+    const IconComp = ExecutorTypeIcons[type as keyof typeof ExecutorTypeIcons] || Terminal;
     return (
         <div className={`executor-card ${type} ${selected ? 'selected' : ''}`} onClick={onClick}>
             <div className="executor-card-header">
-                <span className="executor-icon">{getExecutorIcon(type)}</span>
+                <span className="executor-icon"><IconComp size={ICON_SIZE.xl} /></span>
                 <h3>{name}</h3>
                 <HealthBadge status={health.status} />
             </div>
@@ -73,7 +91,7 @@ function ExecutorCard({ type, name, health, stats, onClick, selected }: Executor
                 {Object.entries(stats).slice(0, 4).map(([key, value]) => (
                     <div key={key} className="stat-item">
                         <span className="stat-value">
-                            {typeof value === 'boolean' ? (value ? '✅' : '❌') : value}
+                            {typeof value === 'boolean' ? (value ? <CheckCircle size={14} /> : <XCircle size={14} />) : value}
                         </span>
                         <span className="stat-label">{key.replace(/_/g, ' ')}</span>
                     </div>
@@ -97,7 +115,7 @@ interface SSHDetailPanelProps {
 function SSHDetailPanel({ hosts, onTest, testing }: SSHDetailPanelProps) {
     return (
         <div className="detail-panel ssh-panel">
-            <h3>🔐 SSH Hosts</h3>
+            <h3><Key size={18} /> SSH Hosts</h3>
 
             {hosts.length === 0 ? (
                 <div className="empty-state small">
@@ -127,7 +145,7 @@ function SSHDetailPanel({ hosts, onTest, testing }: SSHDetailPanelProps) {
                                     onClick={() => onTest(host.alias)}
                                     disabled={testing === host.alias}
                                 >
-                                    {testing === host.alias ? '⏳' : '🔌'} Test
+                                    {testing === host.alias ? <Loader2 size={14} className="spin" /> : <Plug size={14} />} Test
                                 </button>
                             </div>
                         </div>
@@ -147,7 +165,7 @@ interface DockerDetailPanelProps {
 function DockerDetailPanel({ containers, onAction, actionLoading }: DockerDetailPanelProps) {
     return (
         <div className="detail-panel docker-panel">
-            <h3>🐳 Containers</h3>
+            <h3><Container size={18} /> Containers</h3>
 
             {containers.length === 0 ? (
                 <div className="empty-state small">
@@ -158,7 +176,10 @@ function DockerDetailPanel({ containers, onAction, actionLoading }: DockerDetail
                     {containers.map(container => (
                         <div key={container.id} className={`container-item ${container.status}`}>
                             <div className="container-status">
-                                {getContainerStatusIcon(container.status)}
+                                {(() => {
+                                    const IconComp = ContainerStatusIcons[container.status as keyof typeof ContainerStatusIcons] || HelpCircle;
+                                    return <IconComp size={16} />;
+                                })()}
                             </div>
                             <div className="container-info">
                                 <span className="container-name">{container.name}</span>
@@ -180,14 +201,14 @@ function DockerDetailPanel({ containers, onAction, actionLoading }: DockerDetail
                                             onClick={() => onAction(container.id, 'restart')}
                                             disabled={actionLoading === container.id}
                                         >
-                                            🔄
+                                            <RotateCw size={14} />
                                         </button>
                                         <button
                                             className="btn-action stop"
                                             onClick={() => onAction(container.id, 'stop')}
                                             disabled={actionLoading === container.id}
                                         >
-                                            ⏹️
+                                            <Square size={14} />
                                         </button>
                                     </>
                                 ) : (
@@ -196,7 +217,7 @@ function DockerDetailPanel({ containers, onAction, actionLoading }: DockerDetail
                                         onClick={() => onAction(container.id, 'start')}
                                         disabled={actionLoading === container.id}
                                     >
-                                        ▶️
+                                        <Play size={14} />
                                     </button>
                                 )}
                             </div>
@@ -217,7 +238,7 @@ interface APIDetailPanelProps {
 function APIDetailPanel({ endpoints, onTest, testing }: APIDetailPanelProps) {
     return (
         <div className="detail-panel api-panel">
-            <h3>🌐 API Endpoints</h3>
+            <h3><Globe size={18} /> API Endpoints</h3>
 
             {endpoints.length === 0 ? (
                 <div className="empty-state small">
@@ -250,7 +271,7 @@ function APIDetailPanel({ endpoints, onTest, testing }: APIDetailPanelProps) {
                                     onClick={() => onTest(endpoint.id)}
                                     disabled={testing === endpoint.id}
                                 >
-                                    {testing === endpoint.id ? '⏳' : '🔌'} Test
+                                    {testing === endpoint.id ? <Loader2 size={14} className="spin" /> : <Plug size={14} />} Test
                                 </button>
                             </div>
                         </div>
@@ -382,12 +403,12 @@ export default function ExecutorsPage() {
             {/* Header */}
             <header className="executors-header">
                 <div className="header-left">
-                    <h1>💻 Executors</h1>
+                    <h1><Terminal size={24} /> Executors</h1>
                     <HealthBadge status={overallHealth} />
                 </div>
                 <div className="header-right">
                     <button className="btn-refresh" onClick={fetchData}>
-                        🔄 Refresh
+                        <RefreshCw size={16} /> Refresh
                     </button>
                 </div>
             </header>
