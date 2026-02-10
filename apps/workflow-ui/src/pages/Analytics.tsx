@@ -251,54 +251,13 @@ export default function AnalyticsPage() {
     const [error, setError] = useState<string | null>(null);
     const [timeRange, setTimeRange] = useState<TimeRange>('24h');
 
-    // Fetch data
+    // Fetch data — getDashboardOverview now handles all normalization internally
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
 
-            // Default fallback data
-            const defaultOverview: DashboardOverview = {
-                system: {
-                    timestamp: new Date().toISOString(),
-                    cpu_usage: 0,
-                    memory_usage: 0,
-                    disk_usage: 0,
-                    network_in_mbps: 0,
-                    network_out_mbps: 0,
-                    active_connections: 0,
-                },
-                executions: {
-                    total_executions: 0,
-                    successful_executions: 0,
-                    failed_executions: 0,
-                    avg_duration_ms: 0,
-                    executions_by_hour: [],
-                    executions_by_status: [],
-                },
-                issues: {
-                    total_detected: 0,
-                    total_resolved: 0,
-                    avg_resolution_ms: 0,
-                    by_severity: [],
-                    by_category: [],
-                    resolution_trend: [],
-                },
-                events: {
-                    total_events: 0,
-                    events_per_minute: 0,
-                    by_type: {},
-                    by_channel: {},
-                },
-                workflows: {
-                    total_workflows: 0,
-                    active_workflows: 0,
-                    by_trigger_type: {},
-                    most_executed: [],
-                },
-            };
-
             const [ov, ev, cpu, mem] = await Promise.all([
-                getDashboardOverview().catch(() => defaultOverview),
+                getDashboardOverview(),
                 getEventHistory({ limit: 50 }).catch(() => []),
                 getTimeSeriesMetrics('cpu', timeRange).catch(() => []),
                 getTimeSeriesMetrics('memory', timeRange).catch(() => []),
@@ -353,6 +312,9 @@ export default function AnalyticsPage() {
     }
 
     const { system, executions, issues, events: eventStats, workflows } = overview!;
+    const successRate = executions.total_executions > 0
+        ? (executions.successful_executions / executions.total_executions) * 100
+        : 0;
 
     return (
         <div className="analytics-page">
@@ -393,7 +355,7 @@ export default function AnalyticsPage() {
                 <MetricCard
                     icon={<CheckCircle size={24} />}
                     label="Success Rate"
-                    value={formatPercent((executions.successful_executions / executions.total_executions) * 100)}
+                    value={formatPercent(successRate)}
                     color="green"
                 />
                 <MetricCard

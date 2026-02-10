@@ -95,23 +95,99 @@ export interface ChartData {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Get dashboard overview with all key metrics
+ * Normalize raw API data into a guaranteed-safe DashboardOverview.
+ * Every nested array/object gets a fallback so .map() calls never crash.
+ */
+function normalizeDashboardOverview(raw: Partial<DashboardOverview> | null | undefined): DashboardOverview {
+    const fallbackSystem = generateMockSystemMetrics();
+    const fallbackExec = generateMockExecutionStats();
+    const fallbackIssues = generateMockIssueStats();
+    const fallbackEvents = generateMockEventStats();
+    const fallbackWorkflows = generateMockWorkflowStats();
+
+    if (!raw || typeof raw !== 'object') {
+        return {
+            system: fallbackSystem,
+            executions: fallbackExec,
+            issues: fallbackIssues,
+            events: fallbackEvents,
+            workflows: fallbackWorkflows,
+        };
+    }
+
+    const sys = raw.system;
+    const exec = raw.executions;
+    const iss = raw.issues;
+    const evt = raw.events;
+    const wf = raw.workflows;
+
+    return {
+        system: {
+            timestamp: sys?.timestamp || fallbackSystem.timestamp,
+            cpu_usage: Number(sys?.cpu_usage) || 0,
+            memory_usage: Number(sys?.memory_usage) || 0,
+            disk_usage: Number(sys?.disk_usage) || 0,
+            network_in_mbps: Number(sys?.network_in_mbps) || 0,
+            network_out_mbps: Number(sys?.network_out_mbps) || 0,
+            active_connections: Number(sys?.active_connections) || 0,
+        },
+        executions: {
+            total_executions: Number(exec?.total_executions) || 0,
+            successful_executions: Number(exec?.successful_executions) || 0,
+            failed_executions: Number(exec?.failed_executions) || 0,
+            avg_duration_ms: Number(exec?.avg_duration_ms) || 0,
+            executions_by_hour: Array.isArray(exec?.executions_by_hour) ? exec.executions_by_hour : [],
+            executions_by_status: Array.isArray(exec?.executions_by_status) ? exec.executions_by_status : [],
+        },
+        issues: {
+            total_detected: Number(iss?.total_detected) || 0,
+            total_resolved: Number(iss?.total_resolved) || 0,
+            avg_resolution_ms: Number(iss?.avg_resolution_ms) || 0,
+            by_severity: Array.isArray(iss?.by_severity) ? iss.by_severity : [],
+            by_category: Array.isArray(iss?.by_category) ? iss.by_category : [],
+            resolution_trend: Array.isArray(iss?.resolution_trend) ? iss.resolution_trend : [],
+        },
+        events: {
+            total_events: Number(evt?.total_events) || 0,
+            events_per_minute: Number(evt?.events_per_minute) || 0,
+            by_type: (evt?.by_type && typeof evt.by_type === 'object') ? evt.by_type : {},
+            by_channel: (evt?.by_channel && typeof evt.by_channel === 'object') ? evt.by_channel : {},
+        },
+        workflows: {
+            total_workflows: Number(wf?.total_workflows) || 0,
+            active_workflows: Number(wf?.active_workflows) || 0,
+            by_trigger_type: (wf?.by_trigger_type && typeof wf.by_trigger_type === 'object') ? wf.by_trigger_type : {},
+            most_executed: Array.isArray(wf?.most_executed) ? wf.most_executed : [],
+        },
+    };
+}
+
+/**
+ * Get dashboard overview with all key metrics.
+ * Always returns a fully-normalized object — never crashes on partial data.
  */
 export async function getDashboardOverview(): Promise<DashboardOverview> {
-    // Fetch from multiple endpoints and combine
-    const [eventStats, health] = await Promise.all([
-        getEventStats().catch(() => null),
-        getSystemHealth().catch(() => null),
-    ]);
+    try {
+        // Fetch from multiple endpoints and combine
+        const [eventStats, health] = await Promise.all([
+            getEventStats().catch(() => null),
+            getSystemHealth().catch(() => null),
+        ]);
 
-    // Build overview from available data
-    return {
-        system: health?.metrics || generateMockSystemMetrics(),
-        executions: await getExecutionStats().catch(() => generateMockExecutionStats()),
-        issues: await getIssueStats().catch(() => generateMockIssueStats()),
-        events: eventStats || generateMockEventStats(),
-        workflows: await getWorkflowStats().catch(() => generateMockWorkflowStats()),
-    };
+        // Build overview from available data
+        const raw: Partial<DashboardOverview> = {
+            system: health?.metrics || undefined,
+            executions: await getExecutionStats().catch(() => undefined),
+            issues: await getIssueStats().catch(() => undefined),
+            events: eventStats || undefined,
+            workflows: await getWorkflowStats().catch(() => undefined),
+        };
+
+        return normalizeDashboardOverview(raw);
+    } catch {
+        // Total failure — return fully mocked data
+        return normalizeDashboardOverview(null);
+    }
 }
 
 /**
