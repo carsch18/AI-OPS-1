@@ -1,7 +1,7 @@
 """
 AIOps Brain - Phase 3: Human-in-the-Loop
 LangGraph with Interrupt/Resume + PostgreSQL Persistence
-Powered by Cerebras Llama 3.3 70B + Netdata MCP
+Powered by Cerebras Llama 3.1 8B + Netdata MCP
 """
 
 # Load environment variables from .env file
@@ -649,7 +649,7 @@ async def root():
     return {
         "status": "online",
         "service": "AIOps Brain v3.0 - Human-in-the-Loop",
-        "model": "Cerebras Llama 3.3 70B",
+        "model": "Cerebras Llama 3.1 8B",
         "features": ["Investigation", "Remediation", "HITL Approval", "Audit Log"],
         "tools_available": len(NETDATA_TOOLS) + len(REMEDIATION_TOOLS)
     }
@@ -734,7 +734,7 @@ async def chat(request: ChatRequest):
         # Call LLM with tools
         tool_choice_mode = "required" if wants_fix else "auto"
         response = cerebras_client.chat.completions.create(
-            model="llama-3.3-70b",
+            model="llama3.1-8b",
             messages=[{"role": "system", "content": prompt}] + messages,
             tools=all_tools,
             tool_choice=tool_choice_mode
@@ -766,7 +766,7 @@ async def chat(request: ChatRequest):
             
             # Get final response
             final = cerebras_client.chat.completions.create(
-                model="llama-3.3-70b",
+                model="llama3.1-8b",
                 messages=[{"role": "system", "content": prompt}] + messages
             )
             
@@ -1381,7 +1381,7 @@ async def diagnose_alert(request: DiagnoseRequest):
     
     try:
         completion = cerebras_client.chat.completions.create(
-            model="llama3.3-70b",
+            model="llama3.1-8b",
             messages=[
                 {"role": "system", "content": "You are a Site Reliability Engineer AI."},
                 {"role": "user", "content": prompt}
@@ -1517,5 +1517,5 @@ if __name__ == "__main__":
     print("🧠 Starting AIOps Brain v3.0 - Human-in-the-Loop")
     print(f"📡 Netdata URL: {NETDATA_URL}")
     print(f"🗄️ Database: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'configured'}")
-    print(f"🤖 Cerebras API: {'Configured (Llama 3.3 70B)' if CEREBRAS_API_KEY else 'Not configured'}")
+    print(f"🤖 Cerebras API: {'Configured (Llama 3.1 8B)' if CEREBRAS_API_KEY else 'Not configured'}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

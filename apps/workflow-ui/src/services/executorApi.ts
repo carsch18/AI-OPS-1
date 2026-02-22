@@ -1,11 +1,15 @@
 /**
- * Executor API Service - Phase 7E
+ * Executor API Service — FULLY REAL, ZERO MOCKS
  * 
- * Connects to executor management backend APIs:
- * - SSH Executor: Remote command execution status
- * - Docker Executor: Container management status
- * - API Executor: HTTP/webhook integration status
- * - Health checks, metrics, and configuration
+ * Connects to REAL executor management backend APIs:
+ * - SSH Executor: Real host management via /api/ssh/*
+ * - Docker Executor: Real container management via /api/docker/*
+ * - API Executor: Real endpoint stats via /api/executor/stats
+ * 
+ * RULES:
+ * 1. NO mock data generators. EVER.
+ * 2. If an API fails → throw the error, let the UI handle it
+ * 3. Every piece of data comes from a real backend response
  */
 
 const API_BASE = 'http://localhost:8001';
@@ -108,43 +112,119 @@ export interface ExecutorOverview {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// API FUNCTIONS
+// EMPTY DEFAULTS — Zeros, not fakes. These mean "no data available".
+// ═══════════════════════════════════════════════════════════════════════════
+
+const EMPTY_HEALTH: ExecutorHealth = {
+    status: 'unknown',
+    lastCheck: new Date().toISOString(),
+    latency_ms: 0,
+    error: 'Not connected',
+};
+
+const EMPTY_SSH_STATS: SSHExecutorStats = {
+    total_hosts: 0,
+    connected_hosts: 0,
+    total_executions: 0,
+    success_rate: 0,
+    avg_latency_ms: 0,
+    connection_pool_size: 0,
+};
+
+const EMPTY_DOCKER_STATS: DockerExecutorStats = {
+    total_containers: 0,
+    running_containers: 0,
+    total_images: 0,
+    total_volumes: 0,
+    docker_version: 'N/A',
+    api_version: 'N/A',
+    connected: false,
+};
+
+const EMPTY_API_STATS: APIExecutorStats = {
+    total_endpoints: 0,
+    healthy_endpoints: 0,
+    total_requests: 0,
+    success_rate: 0,
+    avg_response_ms: 0,
+    webhooks_configured: 0,
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API FUNCTIONS — REAL backend calls only
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Get overview of all executors
+ * Get overview of all executors by fetching each executor's real status.
+ * Combines SSH hosts, Docker containers, and API executor stats.
  */
 export async function getExecutorOverview(): Promise<ExecutorOverview> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/overview`);
-        if (!response.ok) throw new Error(`Failed to fetch executor overview: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return generateMockExecutorOverview();
-    }
+    // Fetch all three executor statuses in parallel
+    const [sshResult, dockerResult, apiResult] = await Promise.all([
+        getSSHStatus().catch(() => null),
+        getDockerStatus().catch(() => null),
+        getAPIStatus().catch(() => null),
+    ]);
+
+    return {
+        ssh: {
+            health: sshResult?.health ?? { ...EMPTY_HEALTH },
+            stats: sshResult?.stats ?? { ...EMPTY_SSH_STATS },
+        },
+        docker: {
+            health: dockerResult?.health ?? { ...EMPTY_HEALTH },
+            stats: dockerResult?.stats ?? { ...EMPTY_DOCKER_STATS },
+        },
+        api: {
+            health: apiResult?.health ?? { ...EMPTY_HEALTH },
+            stats: apiResult?.stats ?? { ...EMPTY_API_STATS },
+        },
+    };
 }
 
 // --- SSH Executor ---
 
 /**
- * Get SSH executor health and stats
+ * Get REAL SSH executor health, stats, and host list.
+ * Wired to /api/ssh/hosts which queries actual SSH connections.
  */
 export async function getSSHStatus(): Promise<{
     health: ExecutorHealth;
     stats: SSHExecutorStats;
     hosts: SSHHost[];
 }> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/ssh`);
-        if (!response.ok) throw new Error(`Failed to fetch SSH status: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return generateMockSSHStatus();
-    }
+    const response = await fetch(`${API_BASE}/api/ssh/hosts`);
+    if (!response.ok) throw new Error(`SSH executor unavailable: ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+    const hosts: SSHHost[] = Array.isArray(data.hosts) ? data.hosts : Array.isArray(data) ? data : [];
+
+    // Derive stats from real host data
+    const connectedHosts = hosts.filter(h => h.status === 'healthy' || h.status === 'degraded');
+    const avgLatency = hosts.length > 0
+        ? hosts.reduce((sum, h) => sum + (h.avg_latency_ms || 0), 0) / hosts.length
+        : 0;
+
+    return {
+        health: {
+            status: hosts.length === 0 ? 'unknown' : connectedHosts.length === hosts.length ? 'healthy' : connectedHosts.length > 0 ? 'degraded' : 'unhealthy',
+            lastCheck: new Date().toISOString(),
+            latency_ms: avgLatency,
+        },
+        stats: {
+            total_hosts: hosts.length,
+            connected_hosts: connectedHosts.length,
+            total_executions: Number(data.total_executions ?? 0),
+            success_rate: Number(data.success_rate ?? 0),
+            avg_latency_ms: avgLatency,
+            connection_pool_size: Number(data.connection_pool_size ?? hosts.length),
+        },
+        hosts,
+    };
 }
 
 /**
- * Register a new SSH host
+ * Register a new SSH host — REAL backend operation.
  */
 export async function registerSSHHost(host: {
     alias: string;
@@ -155,85 +235,117 @@ export async function registerSSHHost(host: {
     password?: string;
     private_key_path?: string;
 }): Promise<SSHHost> {
-    const response = await fetch(`${API_BASE}/api/executors/ssh/hosts`, {
+    const response = await fetch(`${API_BASE}/api/ssh/hosts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(host),
     });
 
-    if (!response.ok) throw new Error(`Failed to register SSH host: ${response.statusText}`);
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to register SSH host: ${response.statusText}`);
+    }
     return response.json();
 }
 
 /**
- * Test SSH connection to a host
+ * Test SSH connection to a host — REAL SSH test, no fakes.
  */
 export async function testSSHConnection(alias: string): Promise<{
     success: boolean;
     latency_ms: number;
     error?: string;
 }> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/ssh/hosts/${alias}/test`, {
-            method: 'POST',
-        });
-        if (!response.ok) throw new Error(`Failed to test SSH: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return { success: true, latency_ms: Math.floor(Math.random() * 50) + 20 };
+    const response = await fetch(`${API_BASE}/api/ssh/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: alias }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return {
+            success: false,
+            latency_ms: 0,
+            error: errorData.detail || `SSH test failed: ${response.statusText}`,
+        };
     }
+    return response.json();
 }
 
 /**
- * Remove an SSH host
+ * Remove an SSH host — REAL backend deletion.
  */
 export async function removeSSHHost(alias: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/api/executors/ssh/hosts/${alias}`, {
+    const response = await fetch(`${API_BASE}/api/ssh/hosts/${alias}`, {
         method: 'DELETE',
     });
 
-    if (!response.ok) throw new Error(`Failed to remove SSH host: ${response.statusText}`);
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to remove SSH host: ${response.statusText}`);
+    }
 }
 
 // --- Docker Executor ---
 
 /**
- * Get Docker executor health and stats
+ * Get REAL Docker executor health, stats, and container list.
+ * Wired to /api/docker/containers which queries actual Docker daemon.
  */
 export async function getDockerStatus(): Promise<{
     health: ExecutorHealth;
     stats: DockerExecutorStats;
     containers: DockerContainer[];
 }> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/docker`);
-        if (!response.ok) throw new Error(`Failed to fetch Docker status: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return generateMockDockerStatus();
-    }
+    const response = await fetch(`${API_BASE}/api/docker/containers`);
+    if (!response.ok) throw new Error(`Docker executor unavailable: ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+    const containers: DockerContainer[] = Array.isArray(data.containers) ? data.containers : Array.isArray(data) ? data : [];
+
+    // Derive stats from real container data
+    const runningContainers = containers.filter(c => c.status === 'running');
+
+    return {
+        health: {
+            status: containers.length === 0 ? 'unknown' : runningContainers.length > 0 ? 'healthy' : 'unhealthy',
+            lastCheck: new Date().toISOString(),
+            latency_ms: 0,
+        },
+        stats: {
+            total_containers: containers.length,
+            running_containers: runningContainers.length,
+            total_images: Number(data.total_images ?? 0),
+            total_volumes: Number(data.total_volumes ?? 0),
+            docker_version: String(data.docker_version ?? 'N/A'),
+            api_version: String(data.api_version ?? 'N/A'),
+            connected: true,
+        },
+        containers,
+    };
 }
 
 /**
- * Perform action on a container
+ * Perform action on a container — REAL Docker operation.
  */
 export async function containerAction(containerId: string, action: 'start' | 'stop' | 'restart' | 'pause' | 'unpause'): Promise<{
     success: boolean;
     message: string;
 }> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/docker/containers/${containerId}/${action}`, {
-            method: 'POST',
-        });
-        if (!response.ok) throw new Error(`Failed to ${action} container: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return { success: true, message: `Container ${action} simulated successfully` };
+    const response = await fetch(`${API_BASE}/api/docker/container/${containerId}/${action}`, {
+        method: 'POST',
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to ${action} container: ${response.statusText}`);
     }
+    return response.json();
 }
 
 /**
- * Get container logs
+ * Get REAL container logs from Docker.
  */
 export async function getContainerLogs(containerId: string, options: {
     tail?: number;
@@ -243,50 +355,67 @@ export async function getContainerLogs(containerId: string, options: {
     if (options.tail) params.append('tail', String(options.tail));
     if (options.since) params.append('since', options.since);
 
-    const response = await fetch(`${API_BASE}/api/executors/docker/containers/${containerId}/logs?${params.toString()}`);
-    if (!response.ok) throw new Error(`Failed to fetch logs: ${response.statusText}`);
+    const response = await fetch(`${API_BASE}/api/docker/container/${containerId}/logs?${params.toString()}`);
+    if (!response.ok) throw new Error(`Failed to fetch container logs: ${response.status} ${response.statusText}`);
 
     return response.json();
 }
 
 /**
- * Execute command in container
+ * Execute command in container — REAL Docker exec.
  */
 export async function execInContainer(containerId: string, command: string): Promise<{
     exit_code: number;
     output: string;
 }> {
-    const response = await fetch(`${API_BASE}/api/executors/docker/containers/${containerId}/exec`, {
+    const response = await fetch(`${API_BASE}/api/docker/container/${containerId}/exec`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command }),
     });
 
-    if (!response.ok) throw new Error(`Failed to execute command: ${response.statusText}`);
+    if (!response.ok) throw new Error(`Failed to execute command: ${response.status} ${response.statusText}`);
     return response.json();
 }
 
 // --- API Executor ---
 
 /**
- * Get API executor health and stats
+ * Get REAL API executor health and stats.
+ * Wired to /api/executor/stats which queries actual API executor.
  */
 export async function getAPIStatus(): Promise<{
     health: ExecutorHealth;
     stats: APIExecutorStats;
     endpoints: APIEndpoint[];
 }> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/api`);
-        if (!response.ok) throw new Error(`Failed to fetch API status: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return generateMockAPIStatus();
-    }
+    const response = await fetch(`${API_BASE}/api/executor/stats`);
+    if (!response.ok) throw new Error(`API executor unavailable: ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+    const stats = data.stats || data;
+    const endpoints: APIEndpoint[] = Array.isArray(data.endpoints) ? data.endpoints : [];
+
+    return {
+        health: {
+            status: stats ? 'healthy' : 'unknown',
+            lastCheck: new Date().toISOString(),
+            latency_ms: Number(stats?.avg_response_ms ?? 0),
+        },
+        stats: {
+            total_endpoints: Number(stats?.total_endpoints ?? endpoints.length),
+            healthy_endpoints: Number(stats?.healthy_endpoints ?? 0),
+            total_requests: Number(stats?.total_requests ?? 0),
+            success_rate: Number(stats?.success_rate ?? 0),
+            avg_response_ms: Number(stats?.avg_response_ms ?? 0),
+            webhooks_configured: Number(stats?.webhooks_configured ?? 0),
+        },
+        endpoints,
+    };
 }
 
 /**
- * Register a new API endpoint
+ * Register a new API endpoint — REAL backend operation.
  */
 export async function registerAPIEndpoint(endpoint: {
     name: string;
@@ -296,7 +425,7 @@ export async function registerAPIEndpoint(endpoint: {
     headers?: Record<string, string>;
     auth_config?: Record<string, string>;
 }): Promise<APIEndpoint> {
-    const response = await fetch(`${API_BASE}/api/executors/api/endpoints`, {
+    const response = await fetch(`${API_BASE}/api/executor/endpoints`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(endpoint),
@@ -307,7 +436,7 @@ export async function registerAPIEndpoint(endpoint: {
 }
 
 /**
- * Test API endpoint
+ * Test API endpoint — REAL test, no fake latencies.
  */
 export async function testAPIEndpoint(endpointId: string): Promise<{
     success: boolean;
@@ -315,22 +444,27 @@ export async function testAPIEndpoint(endpointId: string): Promise<{
     response_ms: number;
     error?: string;
 }> {
-    try {
-        const response = await fetch(`${API_BASE}/api/executors/api/endpoints/${endpointId}/test`, {
-            method: 'POST',
-        });
-        if (!response.ok) throw new Error(`Failed to test endpoint: ${response.statusText}`);
-        return response.json();
-    } catch {
-        return { success: true, status_code: 200, response_ms: Math.floor(Math.random() * 100) + 50 };
+    const response = await fetch(`${API_BASE}/api/executor/endpoints/${endpointId}/test`, {
+        method: 'POST',
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return {
+            success: false,
+            status_code: response.status,
+            response_ms: 0,
+            error: errorData.detail || `Endpoint test failed: ${response.statusText}`,
+        };
     }
+    return response.json();
 }
 
 /**
- * Remove an API endpoint
+ * Remove an API endpoint — REAL backend deletion.
  */
 export async function removeAPIEndpoint(endpointId: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/api/executors/api/endpoints/${endpointId}`, {
+    const response = await fetch(`${API_BASE}/api/executor/endpoints/${endpointId}`, {
         method: 'DELETE',
     });
 
@@ -338,115 +472,7 @@ export async function removeAPIEndpoint(endpointId: string): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MOCK DATA GENERATORS (for demo when backend not available)
-// ═══════════════════════════════════════════════════════════════════════════
-
-function generateMockExecutorOverview(): ExecutorOverview {
-    return {
-        ssh: {
-            health: { status: 'healthy', lastCheck: new Date().toISOString(), latency_ms: 45 },
-            stats: {
-                total_hosts: 5,
-                connected_hosts: 4,
-                total_executions: 1234,
-                success_rate: 0.97,
-                avg_latency_ms: 42,
-                connection_pool_size: 10,
-            },
-        },
-        docker: {
-            health: { status: 'healthy', lastCheck: new Date().toISOString(), latency_ms: 15 },
-            stats: {
-                total_containers: 12,
-                running_containers: 8,
-                total_images: 25,
-                total_volumes: 7,
-                docker_version: '24.0.7',
-                api_version: '1.43',
-                connected: true,
-            },
-        },
-        api: {
-            health: { status: 'healthy', lastCheck: new Date().toISOString(), latency_ms: 120 },
-            stats: {
-                total_endpoints: 8,
-                healthy_endpoints: 7,
-                total_requests: 5678,
-                success_rate: 0.95,
-                avg_response_ms: 145,
-                webhooks_configured: 3,
-            },
-        },
-    };
-}
-
-function generateMockSSHStatus(): { health: ExecutorHealth; stats: SSHExecutorStats; hosts: SSHHost[] } {
-    return {
-        health: { status: 'healthy', lastCheck: new Date().toISOString(), latency_ms: 45 },
-        stats: {
-            total_hosts: 5,
-            connected_hosts: 4,
-            total_executions: 1234,
-            success_rate: 0.97,
-            avg_latency_ms: 42,
-            connection_pool_size: 10,
-        },
-        hosts: [
-            { alias: 'web-server-01', hostname: '192.168.1.101', username: 'deploy', port: 22, auth_method: 'key', status: 'healthy', last_connected: new Date().toISOString(), connection_count: 156, avg_latency_ms: 32 },
-            { alias: 'db-master', hostname: '192.168.1.50', username: 'admin', port: 22, auth_method: 'key', status: 'healthy', last_connected: new Date().toISOString(), connection_count: 89, avg_latency_ms: 28 },
-            { alias: 'cache-node-01', hostname: '192.168.1.60', username: 'ops', port: 22, auth_method: 'key', status: 'healthy', last_connected: new Date().toISOString(), connection_count: 234, avg_latency_ms: 25 },
-            { alias: 'worker-01', hostname: '192.168.1.110', username: 'worker', port: 22, auth_method: 'key', status: 'degraded', last_connected: new Date().toISOString(), connection_count: 67, avg_latency_ms: 89 },
-            { alias: 'monitoring', hostname: '192.168.1.200', username: 'monitor', port: 22, auth_method: 'key', status: 'healthy', last_connected: new Date().toISOString(), connection_count: 45, avg_latency_ms: 35 },
-        ],
-    };
-}
-
-function generateMockDockerStatus(): { health: ExecutorHealth; stats: DockerExecutorStats; containers: DockerContainer[] } {
-    return {
-        health: { status: 'healthy', lastCheck: new Date().toISOString(), latency_ms: 15 },
-        stats: {
-            total_containers: 12,
-            running_containers: 8,
-            total_images: 25,
-            total_volumes: 7,
-            docker_version: '24.0.7',
-            api_version: '1.43',
-            connected: true,
-        },
-        containers: [
-            { id: 'c1a2b3c4', name: 'nginx-proxy', image: 'nginx:alpine', status: 'running', state: 'Up 3 days', created: new Date().toISOString(), ports: ['80:80', '443:443'], cpu_percent: 2.5, memory_usage_mb: 64, memory_limit_mb: 512 },
-            { id: 'd5e6f7g8', name: 'api-gateway', image: 'aiops/gateway:v2.1', status: 'running', state: 'Up 3 days', created: new Date().toISOString(), ports: ['8080:8080'], cpu_percent: 15.3, memory_usage_mb: 384, memory_limit_mb: 1024 },
-            { id: 'h9i0j1k2', name: 'redis-cache', image: 'redis:7-alpine', status: 'running', state: 'Up 5 days', created: new Date().toISOString(), ports: ['6379:6379'], cpu_percent: 1.2, memory_usage_mb: 128, memory_limit_mb: 256 },
-            { id: 'l3m4n5o6', name: 'postgres-db', image: 'postgres:15', status: 'running', state: 'Up 7 days', created: new Date().toISOString(), ports: ['5432:5432'], cpu_percent: 8.7, memory_usage_mb: 512, memory_limit_mb: 2048 },
-            { id: 'p7q8r9s0', name: 'worker-processor', image: 'aiops/worker:v1.5', status: 'running', state: 'Up 1 day', created: new Date().toISOString(), ports: [], cpu_percent: 45.2, memory_usage_mb: 768, memory_limit_mb: 1536 },
-            { id: 't1u2v3w4', name: 'ml-inference', image: 'aiops/ml:v3.0', status: 'paused', state: 'Paused', created: new Date().toISOString(), ports: ['8501:8501'], cpu_percent: 0, memory_usage_mb: 256, memory_limit_mb: 4096 },
-        ],
-    };
-}
-
-function generateMockAPIStatus(): { health: ExecutorHealth; stats: APIExecutorStats; endpoints: APIEndpoint[] } {
-    return {
-        health: { status: 'healthy', lastCheck: new Date().toISOString(), latency_ms: 120 },
-        stats: {
-            total_endpoints: 8,
-            healthy_endpoints: 7,
-            total_requests: 5678,
-            success_rate: 0.95,
-            avg_response_ms: 145,
-            webhooks_configured: 3,
-        },
-        endpoints: [
-            { id: 'ep-1', name: 'Slack Webhook', url: 'https://hooks.slack.com/services/...', method: 'POST', auth_type: 'bearer', status: 'healthy', last_called: new Date().toISOString(), success_rate: 0.99, avg_response_ms: 89 },
-            { id: 'ep-2', name: 'PagerDuty Alert', url: 'https://events.pagerduty.com/v2/...', method: 'POST', auth_type: 'api_key', status: 'healthy', last_called: new Date().toISOString(), success_rate: 0.98, avg_response_ms: 156 },
-            { id: 'ep-3', name: 'Jira Create Issue', url: 'https://company.atlassian.net/rest/api/3/issue', method: 'POST', auth_type: 'basic', status: 'healthy', last_called: new Date().toISOString(), success_rate: 0.95, avg_response_ms: 234 },
-            { id: 'ep-4', name: 'ServiceNow Incident', url: 'https://company.service-now.com/api/now/table/incident', method: 'POST', auth_type: 'oauth2', status: 'healthy', last_called: new Date().toISOString(), success_rate: 0.94, avg_response_ms: 312 },
-            { id: 'ep-5', name: 'Custom Webhook', url: 'https://internal.company.com/webhooks/alerts', method: 'POST', auth_type: 'bearer', status: 'degraded', last_called: new Date().toISOString(), success_rate: 0.78, avg_response_ms: 450 },
-        ],
-    };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS — These are pure formatting helpers, no data generation
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**

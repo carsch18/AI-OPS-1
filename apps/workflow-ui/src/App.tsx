@@ -1,6 +1,9 @@
 /**
  * AIOps Platform - Main App with Routing
  * MAANG-grade unified operations platform
+ * 
+ * Phase 4: Production-hardened with connection status bar,
+ * live sidebar badges, ErrorBoundary on all routes.
  */
 
 import { useState, useCallback } from 'react';
@@ -18,6 +21,10 @@ import RemediationPage from './pages/Remediation';
 import ExecutorsPage from './pages/Executors';
 import AnalyticsPage from './pages/Analytics';
 import SettingsPage from './pages/Settings';
+import AiChatPage from './pages/AiChat';
+import IncidentsPage from './pages/Incidents';
+import AlertsPage from './pages/Alerts';
+import AutonomousOpsPage from './pages/AutonomousOps';
 
 // Workflow Builder Components (existing)
 import Header from './components/Header';
@@ -30,6 +37,16 @@ import workflowApi from './services/api';
 
 // Toast Notifications
 import { ToastProvider, ToastContainer, EventToastBridge } from './components/ToastNotifications';
+
+// Phase 4: Connection Status Bar
+import { ConnectionStatusBar } from './components/ConnectionStatusBar';
+
+// Phase 4: Command Palette + Keyboard Shortcuts
+import { CommandPalette } from './components/CommandPalette';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+
+// Phase 4: Real-time event badges
+import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 
 // Error Boundary for graceful crash handling
 import { PageErrorBoundary } from './components/ErrorBoundary';
@@ -45,18 +62,34 @@ import {
   Terminal,
   BarChart3,
   Settings,
+  Bot,
+  AlertTriangle,
+  Bell,
+  Radar,
 } from './components/Icons';
 
 import './index.css';
 
-// Sidebar Navigation Component
+// Sidebar Navigation Component — Phase 4: Real-time badge counters
 function Sidebar() {
+  const {
+    newIssuesCount,
+    pendingApprovalsCount,
+    activeExecutionsCount,
+    alertEvents,
+  } = useRealtimeEvents({ enabled: true });
+
+  const alertCount = alertEvents.length;
 
   const navItems: { path: string; icon: ReactNode; label: string; badge?: number }[] = [
     { path: '/', icon: <LayoutDashboard size={18} />, label: 'Command Center' },
+    { path: '/ai-chat', icon: <Bot size={18} />, label: 'AI Chat' },
+    { path: '/incidents', icon: <AlertTriangle size={18} />, label: 'Incidents' },
+    { path: '/alerts', icon: <Bell size={18} />, label: 'Alerts', badge: alertCount },
+    { path: '/autonomous', icon: <Radar size={18} />, label: 'Autonomous', badge: activeExecutionsCount },
     { path: '/workflows', icon: <Workflow size={18} />, label: 'Workflows' },
-    { path: '/issues', icon: <Flame size={18} />, label: 'Issues', badge: 0 },
-    { path: '/remediation', icon: <Wrench size={18} />, label: 'Remediation' },
+    { path: '/issues', icon: <Flame size={18} />, label: 'Issues', badge: newIssuesCount },
+    { path: '/remediation', icon: <Wrench size={18} />, label: 'Remediation', badge: pendingApprovalsCount },
     { path: '/executors', icon: <Terminal size={18} />, label: 'Executors' },
     { path: '/analytics', icon: <BarChart3 size={18} />, label: 'Analytics' },
   ];
@@ -78,7 +111,7 @@ function Sidebar() {
             <span className="nav-icon">{item.icon}</span>
             <span className="nav-label">{item.label}</span>
             {item.badge !== undefined && item.badge > 0 && (
-              <span className="nav-badge">{item.badge}</span>
+              <span className="nav-badge">{item.badge > 99 ? '99+' : item.badge}</span>
             )}
           </NavLink>
         ))}
@@ -216,17 +249,53 @@ function WorkflowBuilder() {
 
 
 
-// Main App with Router
-function App() {
+// AppShell — inner component that has access to BrowserRouter context
+function AppShell() {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useKeyboardShortcuts({
+    onCommandPalette: () => setPaletteOpen(p => !p),
+    onEscape: () => setPaletteOpen(false),
+  });
+
   return (
-    <BrowserRouter>
-      <ToastProvider>
-        <div className="app-root">
-          <Sidebar />
+    <>
+      <div className="app-root">
+        <Sidebar />
+        <div className="app-main-wrapper">
+          <ConnectionStatusBar />
           <main className="app-main">
             <Routes>
-              <Route path="/" element={<CommandCenter />} />
-              <Route path="/workflows" element={<WorkflowBuilder />} />
+              <Route path="/" element={
+                <PageErrorBoundary pageName="Command Center">
+                  <CommandCenter />
+                </PageErrorBoundary>
+              } />
+              <Route path="/ai-chat" element={
+                <PageErrorBoundary pageName="AI Chat">
+                  <AiChatPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/incidents" element={
+                <PageErrorBoundary pageName="Incidents">
+                  <IncidentsPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/alerts" element={
+                <PageErrorBoundary pageName="Alerts">
+                  <AlertsPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/autonomous" element={
+                <PageErrorBoundary pageName="Autonomous Ops">
+                  <AutonomousOpsPage />
+                </PageErrorBoundary>
+              } />
+              <Route path="/workflows" element={
+                <PageErrorBoundary pageName="Workflow Builder">
+                  <WorkflowBuilder />
+                </PageErrorBoundary>
+              } />
               <Route path="/issues" element={
                 <PageErrorBoundary pageName="Issues">
                   <IssuesPage />
@@ -247,12 +316,28 @@ function App() {
                   <AnalyticsPage />
                 </PageErrorBoundary>
               } />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings" element={
+                <PageErrorBoundary pageName="Settings">
+                  <SettingsPage />
+                </PageErrorBoundary>
+              } />
             </Routes>
           </main>
         </div>
-        <ToastContainer />
-        <EventToastBridge />
+      </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ToastContainer />
+      <EventToastBridge />
+    </>
+  );
+}
+
+// Main App with Router — Phase 4: Hardened
+function App() {
+  return (
+    <BrowserRouter>
+      <ToastProvider>
+        <AppShell />
       </ToastProvider>
     </BrowserRouter>
   );

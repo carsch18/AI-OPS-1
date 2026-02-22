@@ -194,7 +194,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
                 issue.pattern_name.toLowerCase().includes(query) ||
                 issue.message.toLowerCase().includes(query) ||
                 issue.host.toLowerCase().includes(query) ||
-                issue.category.toLowerCase().includes(query)
+                (issue.category ?? '').toLowerCase().includes(query)
             );
         }
 
@@ -225,7 +225,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
                     comparison = a.host.localeCompare(b.host);
                     break;
                 case 'category':
-                    comparison = a.category.localeCompare(b.category);
+                    comparison = (a.category ?? '').localeCompare(b.category ?? '');
                     break;
                 case 'status':
                     comparison = a.status.localeCompare(b.status);
@@ -252,7 +252,7 @@ export function useIssues(options: UseIssuesOptions = {}): UseIssuesReturn {
         };
 
         for (const issue of issues) {
-            if (grouped[issue.category]) {
+            if (issue.category && grouped[issue.category]) {
                 grouped[issue.category].push(issue);
             }
         }

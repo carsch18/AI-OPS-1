@@ -1,0 +1,435 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Autonomous Operations Center — Mission Control for Auto-Remediation
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.autonomous-page {
+    padding: 24px;
+    min-height: 100vh;
+    background: var(--bg-primary, #0a0a0f);
+}
+
+.autonomous-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.autonomous-header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-primary, #f0f0f5);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.autonomous-header h1 .icon {
+    color: #8b5cf6;
+}
+
+.autonomous-header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ─── Master Controls ─── */
+.autonomous-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.control-card {
+    padding: 20px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.control-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.control-card-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary, #f0f0f5);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.control-card-status {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.control-card-status.enabled {
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+}
+
+.control-card-status.disabled {
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+}
+
+.control-card-status.active {
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbbf24;
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+}
+
+.control-card-desc {
+    font-size: 12px;
+    color: var(--text-tertiary, #64748b);
+    line-height: 1.5;
+}
+
+.control-toggle-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.control-toggle-btn.enable {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+}
+
+.control-toggle-btn.enable:hover {
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+}
+
+.control-toggle-btn.disable {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+}
+
+.control-toggle-btn.disable:hover {
+    background: rgba(239, 68, 68, 0.2);
+}
+
+.control-toggle-btn.kill {
+    background: #ef4444;
+    color: white;
+}
+
+.control-toggle-btn.kill:hover {
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+}
+
+.control-toggle-btn.unkill {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+}
+
+.control-toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ─── Stats Grid ─── */
+.autonomous-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.auto-stat-card {
+    padding: 16px 18px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.auto-stat-card .stat-value {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text-primary, #f0f0f5);
+}
+
+.auto-stat-card .stat-label {
+    font-size: 12px;
+    color: var(--text-tertiary, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+/* ─── Section Layout ─── */
+.autonomous-sections {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.autonomous-section {
+    padding: 20px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.autonomous-section.full-width {
+    grid-column: 1 / -1;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.section-header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary, #f0f0f5);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-header .count-badge {
+    background: rgba(99, 102, 241, 0.12);
+    color: #818cf8;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ─── Approval Cards ─── */
+.approval-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.approval-card {
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.04);
+    border: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.approval-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.approval-card-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary, #f0f0f5);
+    flex: 1;
+}
+
+.approval-card-meta {
+    font-size: 11px;
+    color: var(--text-tertiary, #64748b);
+    margin-bottom: 10px;
+}
+
+.approval-card-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.approval-btn {
+    padding: 6px 14px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+}
+
+.approval-btn.approve {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+}
+
+.approval-btn.reject {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+}
+
+.approval-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ─── Trigger Log ─── */
+.trigger-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.trigger-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.trigger-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.trigger-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+}
+
+.trigger-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.trigger-item .trigger-time {
+    color: var(--text-tertiary, #64748b);
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+/* ─── Audit Log ─── */
+.audit-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.audit-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.audit-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.audit-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+}
+
+.audit-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-tertiary, #64748b);
+    display: flex;
+    gap: 8px;
+}
+
+.audit-item .audit-time {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+/* ─── Empty States ─── */
+.section-empty {
+    text-align: center;
+    padding: 24px;
+    font-size: 13px;
+    color: var(--text-tertiary, #64748b);
+}
+
+.autonomous-loading {
+    padding: 40px;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-tertiary, #64748b);
+    font-size: 14px;
+}
+
+.autonomous-error {
+    padding: 24px;
+    border-radius: 12px;
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    text-align: center;
+}
+
+.autonomous-error .error-text {
+    font-size: 14px;
+    color: #fca5a5;
+    margin-bottom: 12px;
+}
+
+.autonomous-error .retry-btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: transparent;
+    color: #f87171;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    .autonomous-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .autonomous-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .autonomous-sections {
+        grid-template-columns: 1fr;
+    }
+}

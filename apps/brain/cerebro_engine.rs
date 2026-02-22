@@ -171,6 +171,11 @@ use ordered_float::OrderedFloat;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 // ----------------------------------------------------------------------------
+// Async Traits
+// ----------------------------------------------------------------------------
+use async_trait::async_trait;
+
+// ----------------------------------------------------------------------------
 // Regex & Pattern Matching
 // ----------------------------------------------------------------------------
 use regex::Regex;
@@ -1620,6 +1625,32 @@ pub enum MetricCategory {
     /// Fan speed
     FanSpeed,
     
+    // ---- Collector-Level Categories ----
+    /// General availability (up/down)
+    Availability,
+    /// Disk I/O operations (reads/writes)
+    DiskIo,
+    /// Disk space usage (bytes/percent)
+    DiskSpace,
+    /// Network traffic (bytes/packets)
+    NetworkTraffic,
+    /// System resource (file handles, entropy, etc.)
+    SystemResource,
+    /// Container I/O (block device reads/writes)
+    ContainerIo,
+    /// Database connections
+    DatabaseConnections,
+    /// Process count
+    ProcessCount,
+    /// HTTP response time
+    HttpResponseTime,
+    /// HTTP status code
+    HttpStatus,
+    /// HTTP errors
+    HttpErrors,
+    /// HTTP request rate
+    HttpRequestRate,
+    
     // ---- Custom ----
     /// User-defined category
     Custom,
@@ -1636,6 +1667,7 @@ impl MetricCategory {
             | MetricCategory::Dns
             | MetricCategory::HealthCheck
             | MetricCategory::ServiceAvailability
+            | MetricCategory::Availability
             | MetricCategory::Certificate => "availability",
             
             MetricCategory::ResponseTime
@@ -1662,27 +1694,35 @@ impl MetricCategory {
             | MetricCategory::DiskIops
             | MetricCategory::DiskLatency
             | MetricCategory::DiskThroughput
-            | MetricCategory::DiskQueueDepth => "disk",
+            | MetricCategory::DiskQueueDepth
+            | MetricCategory::DiskIo
+            | MetricCategory::DiskSpace => "disk",
             
             MetricCategory::NetworkBandwidth
             | MetricCategory::NetworkPackets
             | MetricCategory::NetworkErrors
             | MetricCategory::NetworkDrops
-            | MetricCategory::NetworkConnections => "network",
+            | MetricCategory::NetworkConnections
+            | MetricCategory::NetworkTraffic => "network",
             
             MetricCategory::ErrorRate
             | MetricCategory::RequestRate
             | MetricCategory::ActiveConnections
             | MetricCategory::QueueDepth
             | MetricCategory::CacheHitRate
-            | MetricCategory::ApplicationCustom => "application",
+            | MetricCategory::ApplicationCustom
+            | MetricCategory::HttpResponseTime
+            | MetricCategory::HttpStatus
+            | MetricCategory::HttpErrors
+            | MetricCategory::HttpRequestRate => "application",
             
             MetricCategory::QueryLatency
             | MetricCategory::ConnectionPool
             | MetricCategory::Deadlocks
             | MetricCategory::SlowQueries
             | MetricCategory::ReplicationLag
-            | MetricCategory::DatabaseSize => "database",
+            | MetricCategory::DatabaseSize
+            | MetricCategory::DatabaseConnections => "database",
             
             MetricCategory::SuspiciousTraffic
             | MetricCategory::DdosIndicator
@@ -1694,18 +1734,21 @@ impl MetricCategory {
             | MetricCategory::ContainerMemory
             | MetricCategory::ContainerRestarts
             | MetricCategory::ContainerHealth
-            | MetricCategory::ContainerNetwork => "container",
+            | MetricCategory::ContainerNetwork
+            | MetricCategory::ContainerIo => "container",
             
             MetricCategory::ProcessCpu
             | MetricCategory::ProcessMemory
             | MetricCategory::ProcessThreads
             | MetricCategory::ProcessFd
-            | MetricCategory::ProcessIo => "process",
+            | MetricCategory::ProcessIo
+            | MetricCategory::ProcessCount => "process",
             
             MetricCategory::HardwareSensor
             | MetricCategory::Power
             | MetricCategory::Temperature
-            | MetricCategory::FanSpeed => "hardware",
+            | MetricCategory::FanSpeed
+            | MetricCategory::SystemResource => "hardware",
             
             MetricCategory::Custom | MetricCategory::Unknown => "other",
         }
@@ -17034,3 +17077,2920 @@ impl Default for CollectorRegistry {
     }
 }
 
+
+// ============================================================================
+// ██████╗ ██╗  ██╗ █████╗ ███████╗███████╗    ███████╗
+// ██╔══██╗██║  ██║██╔══██╗██╔════╝██╔════╝    ██╔════╝
+// ██████╔╝███████║███████║███████╗█████╗      ███████╗
+// ██╔═══╝ ██╔══██║██╔══██║╚════██║██╔══╝      ╚════██║
+// ██║     ██║  ██║██║  ██║███████║███████╗    ███████║
+// ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝    ╚══════╝
+// COLLECTOR IMPLEMENTATIONS - REAL METRIC GATHERING
+// ============================================================================
+
+// ============================================================================
+// SECTION 28: SYSTEM METRICS COLLECTOR
+// ============================================================================
+// The most critical collector - reads directly from /proc and /sys to gather
+// CPU, memory, disk, and network metrics with zero external dependencies.
+// Uses delta computation for rate metrics (CPU%, disk I/O, network throughput).
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 28.1 CPU Snapshot - For Delta Computation
+// ----------------------------------------------------------------------------
+
+/// Snapshot of CPU counters from /proc/stat for computing deltas.
+#[derive(Debug, Clone, Default)]
+struct CpuSnapshot {
+    /// CPU core identifier ("cpu" for aggregate, "cpu0" for core 0, etc.)
+    core_id: CompactString,
+    /// User mode ticks
+    user: u64,
+    /// Nice priority user mode ticks
+    nice: u64,
+    /// System mode ticks
+    system: u64,
+    /// Idle ticks
+    idle: u64,
+    /// I/O wait ticks
+    iowait: u64,
+    /// Hardware IRQ ticks
+    irq: u64,
+    /// Software IRQ ticks
+    softirq: u64,
+    /// Stolen ticks (virtualization)
+    steal: u64,
+}
+
+impl CpuSnapshot {
+    /// Total ticks across all modes.
+    fn total(&self) -> u64 {
+        self.user + self.nice + self.system + self.idle
+            + self.iowait + self.irq + self.softirq + self.steal
+    }
+
+    /// Active (non-idle) ticks.
+    fn active(&self) -> u64 {
+        self.total() - self.idle - self.iowait
+    }
+
+    /// Parse a cpu line from /proc/stat.
+    /// Format: "cpu0 12345 678 9012 34567 890 12 34 56"
+    fn parse(line: &str) -> Option<Self> {
+        let mut parts = line.split_whitespace();
+        let core_id = CompactString::from(parts.next()?);
+        
+        // Must start with "cpu"
+        if !core_id.starts_with("cpu") {
+            return None;
+        }
+
+        let user: u64 = parts.next()?.parse().ok()?;
+        let nice: u64 = parts.next()?.parse().ok()?;
+        let system: u64 = parts.next()?.parse().ok()?;
+        let idle: u64 = parts.next()?.parse().ok()?;
+        let iowait: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let irq: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let softirq: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let steal: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        Some(Self { core_id, user, nice, system, idle, iowait, irq, softirq, steal })
+    }
+
+    /// Compute percentage metrics from delta between two snapshots.
+    fn compute_percentages(&self, prev: &CpuSnapshot) -> CpuPercentages {
+        let total_delta = self.total().saturating_sub(prev.total());
+        if total_delta == 0 {
+            return CpuPercentages::default();
+        }
+
+        let d = total_delta as f64;
+        CpuPercentages {
+            user: (self.user.saturating_sub(prev.user) as f64 / d) * 100.0,
+            nice: (self.nice.saturating_sub(prev.nice) as f64 / d) * 100.0,
+            system: (self.system.saturating_sub(prev.system) as f64 / d) * 100.0,
+            idle: (self.idle.saturating_sub(prev.idle) as f64 / d) * 100.0,
+            iowait: (self.iowait.saturating_sub(prev.iowait) as f64 / d) * 100.0,
+            irq: (self.irq.saturating_sub(prev.irq) as f64 / d) * 100.0,
+            softirq: (self.softirq.saturating_sub(prev.softirq) as f64 / d) * 100.0,
+            steal: (self.steal.saturating_sub(prev.steal) as f64 / d) * 100.0,
+            usage: (self.active().saturating_sub(prev.active()) as f64 / d) * 100.0,
+        }
+    }
+}
+
+/// Computed CPU percentages from delta.
+#[derive(Debug, Clone, Default)]
+struct CpuPercentages {
+    user: f64,
+    nice: f64,
+    system: f64,
+    idle: f64,
+    iowait: f64,
+    irq: f64,
+    softirq: f64,
+    steal: f64,
+    usage: f64,
+}
+
+// ----------------------------------------------------------------------------
+// 28.2 Disk Snapshot - For Delta Computation
+// ----------------------------------------------------------------------------
+
+/// Snapshot of disk counters from /proc/diskstats for computing deltas.
+#[derive(Debug, Clone, Default)]
+struct DiskSnapshot {
+    /// Device name (e.g., "sda", "nvme0n1")
+    device: CompactString,
+    /// Reads completed
+    reads_completed: u64,
+    /// Reads merged
+    reads_merged: u64,
+    /// Sectors read
+    sectors_read: u64,
+    /// Time reading (ms)
+    read_time_ms: u64,
+    /// Writes completed
+    writes_completed: u64,
+    /// Writes merged
+    writes_merged: u64,
+    /// Sectors written
+    sectors_written: u64,
+    /// Time writing (ms)
+    write_time_ms: u64,
+    /// I/Os currently in progress
+    ios_in_progress: u64,
+    /// Time doing I/Os (ms)
+    io_time_ms: u64,
+    /// Weighted time doing I/Os (ms)
+    weighted_io_time_ms: u64,
+}
+
+impl DiskSnapshot {
+    /// Sector size in bytes (standard for Linux).
+    const SECTOR_SIZE: u64 = 512;
+
+    /// Parse a line from /proc/diskstats.
+    /// Format: "   8       0 sda 12345 678 901234 5678 ..."
+    fn parse(line: &str) -> Option<Self> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 14 {
+            return None;
+        }
+
+        let device = CompactString::from(parts[2]);
+
+        // Skip loop devices, ram devices, and partitions (devices ending in digits
+        // where the base device also exists — handled at collection level)
+        if device.starts_with("loop") || device.starts_with("ram") || device.starts_with("dm-") {
+            return None;
+        }
+
+        Some(Self {
+            device,
+            reads_completed: parts[3].parse().unwrap_or(0),
+            reads_merged: parts[4].parse().unwrap_or(0),
+            sectors_read: parts[5].parse().unwrap_or(0),
+            read_time_ms: parts[6].parse().unwrap_or(0),
+            writes_completed: parts[7].parse().unwrap_or(0),
+            writes_merged: parts[8].parse().unwrap_or(0),
+            sectors_written: parts[9].parse().unwrap_or(0),
+            write_time_ms: parts[10].parse().unwrap_or(0),
+            ios_in_progress: parts[11].parse().unwrap_or(0),
+            io_time_ms: parts[12].parse().unwrap_or(0),
+            weighted_io_time_ms: parts[13].parse().unwrap_or(0),
+        })
+    }
+
+    /// Check if this is a real block device (not a partition).
+    fn is_whole_disk(&self) -> bool {
+        // Heuristic: whole disks are like sda, nvme0n1, vda
+        // Partitions are like sda1, nvme0n1p1, vda2
+        let name = &self.device;
+        if name.starts_with("nvme") {
+            // NVMe: nvme0n1 is disk, nvme0n1p1 is partition
+            !name.contains('p') || {
+                // Check if 'p' comes after 'n' section
+                if let Some(n_pos) = name.rfind('n') {
+                    let after_n = &name[n_pos + 1..];
+                    // If there's a 'p' after the namespace number, it's a partition
+                    after_n.contains('p')
+                } else {
+                    false
+                }
+            }
+        } else {
+            // Traditional: sda is disk, sda1 is partition
+            !name.ends_with(|c: char| c.is_ascii_digit())
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 28.3 Network Interface Snapshot - For Delta Computation
+// ----------------------------------------------------------------------------
+
+/// Snapshot of network interface counters from /proc/net/dev.
+#[derive(Debug, Clone, Default)]
+struct NetIfSnapshot {
+    /// Interface name (e.g., "eth0", "ens3")
+    interface: CompactString,
+    /// Bytes received
+    rx_bytes: u64,
+    /// Packets received
+    rx_packets: u64,
+    /// Receive errors
+    rx_errors: u64,
+    /// Receive drops
+    rx_drops: u64,
+    /// Bytes transmitted
+    tx_bytes: u64,
+    /// Packets transmitted
+    tx_packets: u64,
+    /// Transmit errors
+    tx_errors: u64,
+    /// Transmit drops
+    tx_drops: u64,
+}
+
+impl NetIfSnapshot {
+    /// Parse a line from /proc/net/dev.
+    /// Format: "  eth0: 12345 678 9 0 0 0 0 0 12345 678 9 0 0 0 0 0"
+    fn parse(line: &str) -> Option<Self> {
+        let line = line.trim();
+        let colon_pos = line.find(':')?;
+        let interface = CompactString::from(line[..colon_pos].trim());
+
+        // Skip loopback
+        if interface == "lo" {
+            return None;
+        }
+
+        let values: Vec<u64> = line[colon_pos + 1..]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        if values.len() < 16 {
+            return None;
+        }
+
+        Some(Self {
+            interface,
+            rx_bytes: values[0],
+            rx_packets: values[1],
+            rx_errors: values[2],
+            rx_drops: values[3],
+            tx_bytes: values[8],
+            tx_packets: values[9],
+            tx_errors: values[10],
+            tx_drops: values[11],
+        })
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 28.4 System Collector Implementation
+// ----------------------------------------------------------------------------
+
+/// System metrics collector - reads directly from /proc and /sys.
+///
+/// Collects CPU, memory, disk, and network metrics at configurable intervals.
+/// Uses delta computation for rate-based metrics to provide accurate per-second values.
+pub struct SystemCollector {
+    /// Base collector for common lifecycle management
+    base: BaseCollector,
+    /// Configuration
+    config: SystemCollectorConfig,
+    /// Previous CPU snapshots for delta computation
+    prev_cpu: RwLock<Vec<CpuSnapshot>>,
+    /// Previous disk snapshots for delta computation
+    prev_disk: RwLock<HashMap<CompactString, DiskSnapshot>>,
+    /// Previous network snapshots for delta computation
+    prev_net: RwLock<HashMap<CompactString, NetIfSnapshot>>,
+    /// Previous collection timestamp for rate computation
+    prev_time: RwLock<Instant>,
+    /// Tokio join handle for the collection task
+    task_handle: TokioMutex<Option<TokioJoinHandle<()>>>,
+    /// Hostname for labeling
+    hostname: CompactString,
+}
+
+impl SystemCollector {
+    /// Create a new system collector.
+    pub fn new(config: SystemCollectorConfig) -> Self {
+        let interval = if config.interval_ms > 0 {
+            Duration::from_millis(config.interval_ms)
+        } else {
+            Duration::from_millis(DEFAULT_COLLECTION_INTERVAL_MS)
+        };
+
+        let hostname = fs::read_to_string("/etc/hostname")
+            .map(|s| CompactString::from(s.trim()))
+            .unwrap_or_else(|_| CompactString::from("unknown"));
+
+        Self {
+            base: BaseCollector::new("system", CollectorType::System)
+                .with_interval(interval),
+            config,
+            prev_cpu: RwLock::new(Vec::new()),
+            prev_disk: RwLock::new(HashMap::new()),
+            prev_net: RwLock::new(HashMap::new()),
+            prev_time: RwLock::new(Instant::now()),
+            task_handle: TokioMutex::new(None),
+            hostname,
+        }
+    }
+
+    /// Build a metric with standard system labels.
+    fn build_metric(&self, name: &str, value: MetricValue, category: MetricCategory) -> Metric {
+        Metric::new(CompactString::from(name), value)
+            .with_source(MetricSource::System { subsystem: SystemSubsystem::Cpu })
+            .with_category(category)
+            .with_label("host", self.hostname.as_str())
+            .with_priority(Priority::Normal)
+    }
+
+    /// Build a metric with extra labels.
+    fn build_metric_with_labels(
+        &self,
+        name: &str,
+        value: MetricValue,
+        category: MetricCategory,
+        extra_labels: &[(&str, &str)],
+    ) -> Metric {
+        let mut metric = self.build_metric(name, value, category);
+        for (k, v) in extra_labels {
+            metric = metric.with_label(*k, *v);
+        }
+        metric
+    }
+
+    // ---- CPU collection ----
+
+    /// Read CPU snapshots from /proc/stat.
+    fn read_cpu_snapshots() -> Vec<CpuSnapshot> {
+        let content = match fs::read_to_string("/proc/stat") {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        content.lines()
+            .filter(|line| line.starts_with("cpu"))
+            .filter_map(CpuSnapshot::parse)
+            .collect()
+    }
+
+    /// Read extra CPU metrics from /proc/stat (context switches, forks, procs).
+    fn read_cpu_extras(content: &str) -> (u64, u64, u64, u64) {
+        let mut ctxt = 0u64;
+        let mut processes = 0u64;
+        let mut procs_running = 0u64;
+        let mut procs_blocked = 0u64;
+
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("ctxt ") {
+                ctxt = rest.trim().parse().unwrap_or(0);
+            } else if let Some(rest) = line.strip_prefix("processes ") {
+                processes = rest.trim().parse().unwrap_or(0);
+            } else if let Some(rest) = line.strip_prefix("procs_running ") {
+                procs_running = rest.trim().parse().unwrap_or(0);
+            } else if let Some(rest) = line.strip_prefix("procs_blocked ") {
+                procs_blocked = rest.trim().parse().unwrap_or(0);
+            }
+        }
+
+        (ctxt, processes, procs_running, procs_blocked)
+    }
+
+    /// Collect CPU metrics and emit them.
+    fn collect_cpu(&self) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(32);
+
+        let current_snapshots = Self::read_cpu_snapshots();
+        let prev_snapshots = self.prev_cpu.read();
+
+        if !prev_snapshots.is_empty() && prev_snapshots.len() == current_snapshots.len() {
+            for (curr, prev) in current_snapshots.iter().zip(prev_snapshots.iter()) {
+                let pcts = curr.compute_percentages(prev);
+                let is_aggregate = curr.core_id == "cpu";
+                let labels: &[(&str, &str)] = if is_aggregate {
+                    &[("core", "total")]
+                } else {
+                    // We need to create the label dynamically
+                    &[]
+                };
+
+                let core_label = curr.core_id.to_string();
+
+                let mut emit = |name: &str, val: f64| {
+                    let mut m = self.build_metric(name, MetricValue::Gauge(val), MetricCategory::CpuUsage);
+                    m = m.with_label("core", if is_aggregate { "total" } else { &core_label });
+                    metrics.push(m);
+                };
+
+                emit("system.cpu.usage_percent", pcts.usage);
+                emit("system.cpu.user_percent", pcts.user);
+                emit("system.cpu.system_percent", pcts.system);
+                emit("system.cpu.idle_percent", pcts.idle);
+                emit("system.cpu.iowait_percent", pcts.iowait);
+                emit("system.cpu.steal_percent", pcts.steal);
+                emit("system.cpu.irq_percent", pcts.irq);
+                emit("system.cpu.softirq_percent", pcts.softirq);
+                emit("system.cpu.nice_percent", pcts.nice);
+            }
+        }
+
+        // Update previous snapshots
+        drop(prev_snapshots);
+        *self.prev_cpu.write() = current_snapshots;
+
+        // Load averages from /proc/loadavg
+        if let Ok(loadavg) = fs::read_to_string("/proc/loadavg") {
+            let parts: Vec<&str> = loadavg.split_whitespace().collect();
+            if parts.len() >= 3 {
+                if let Ok(load1) = parts[0].parse::<f64>() {
+                    metrics.push(self.build_metric("system.load.1m", MetricValue::Gauge(load1), MetricCategory::CpuUsage));
+                }
+                if let Ok(load5) = parts[1].parse::<f64>() {
+                    metrics.push(self.build_metric("system.load.5m", MetricValue::Gauge(load5), MetricCategory::CpuUsage));
+                }
+                if let Ok(load15) = parts[2].parse::<f64>() {
+                    metrics.push(self.build_metric("system.load.15m", MetricValue::Gauge(load15), MetricCategory::CpuUsage));
+                }
+            }
+        }
+
+        // Context switches & process forks
+        if let Ok(stat_content) = fs::read_to_string("/proc/stat") {
+            let (ctxt, processes, procs_running, procs_blocked) = Self::read_cpu_extras(&stat_content);
+            metrics.push(self.build_metric("system.cpu.context_switches", MetricValue::Counter(ctxt), MetricCategory::CpuUsage));
+            metrics.push(self.build_metric("system.cpu.forks_total", MetricValue::Counter(processes), MetricCategory::CpuUsage));
+            metrics.push(self.build_metric("system.cpu.procs_running", MetricValue::Gauge(procs_running as f64), MetricCategory::CpuUsage));
+            metrics.push(self.build_metric("system.cpu.procs_blocked", MetricValue::Gauge(procs_blocked as f64), MetricCategory::CpuUsage));
+        }
+
+        metrics
+    }
+
+    // ---- Memory collection ----
+
+    /// Collect memory metrics from /proc/meminfo.
+    fn collect_memory(&self) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(16);
+
+        let content = match fs::read_to_string("/proc/meminfo") {
+            Ok(c) => c,
+            Err(_) => return metrics,
+        };
+
+        let mut mem_total: u64 = 0;
+        let mut mem_free: u64 = 0;
+        let mut mem_available: u64 = 0;
+        let mut buffers: u64 = 0;
+        let mut cached: u64 = 0;
+        let mut swap_total: u64 = 0;
+        let mut swap_free: u64 = 0;
+        let mut slab: u64 = 0;
+        let mut sreclaimable: u64 = 0;
+        let mut hugepages_total: u64 = 0;
+        let mut hugepages_free: u64 = 0;
+        let mut dirty: u64 = 0;
+        let mut writeback: u64 = 0;
+
+        // High-performance parser: no regex, just byte scanning with splitn
+        for line in content.lines() {
+            let mut parts = line.splitn(2, ':');
+            let key = match parts.next() {
+                Some(k) => k.trim(),
+                None => continue,
+            };
+            let value_str = match parts.next() {
+                Some(v) => v.trim(),
+                None => continue,
+            };
+            // Value is like "12345 kB" — extract the number
+            let value_kb: u64 = value_str
+                .split_whitespace()
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let value_bytes = value_kb * 1024;
+
+            match key {
+                "MemTotal" => mem_total = value_bytes,
+                "MemFree" => mem_free = value_bytes,
+                "MemAvailable" => mem_available = value_bytes,
+                "Buffers" => buffers = value_bytes,
+                "Cached" => cached = value_bytes,
+                "SwapTotal" => swap_total = value_bytes,
+                "SwapFree" => swap_free = value_bytes,
+                "Slab" => slab = value_bytes,
+                "SReclaimable" => sreclaimable = value_bytes,
+                "HugePages_Total" => hugepages_total = value_kb, // not kB, just count
+                "HugePages_Free" => hugepages_free = value_kb,
+                "Dirty" => dirty = value_bytes,
+                "Writeback" => writeback = value_bytes,
+                _ => {}
+            }
+        }
+
+        let mem_used = mem_total.saturating_sub(mem_available);
+        let swap_used = swap_total.saturating_sub(swap_free);
+        let usage_pct = if mem_total > 0 { (mem_used as f64 / mem_total as f64) * 100.0 } else { 0.0 };
+        let swap_pct = if swap_total > 0 { (swap_used as f64 / swap_total as f64) * 100.0 } else { 0.0 };
+
+        let g = |name: &str, val: f64| -> Metric {
+            self.build_metric(name, MetricValue::Gauge(val), MetricCategory::MemoryUsage)
+        };
+
+        metrics.push(g("system.memory.total_bytes", mem_total as f64));
+        metrics.push(g("system.memory.used_bytes", mem_used as f64));
+        metrics.push(g("system.memory.free_bytes", mem_free as f64));
+        metrics.push(g("system.memory.available_bytes", mem_available as f64));
+        metrics.push(g("system.memory.buffers_bytes", buffers as f64));
+        metrics.push(g("system.memory.cached_bytes", cached as f64));
+        metrics.push(g("system.memory.slab_bytes", slab as f64));
+        metrics.push(g("system.memory.sreclaimable_bytes", sreclaimable as f64));
+        metrics.push(g("system.memory.usage_percent", usage_pct));
+        metrics.push(g("system.memory.dirty_bytes", dirty as f64));
+        metrics.push(g("system.memory.writeback_bytes", writeback as f64));
+        metrics.push(g("system.memory.swap_total_bytes", swap_total as f64));
+        metrics.push(g("system.memory.swap_used_bytes", swap_used as f64));
+        metrics.push(g("system.memory.swap_free_bytes", swap_free as f64));
+        metrics.push(g("system.memory.swap_percent", swap_pct));
+        metrics.push(g("system.memory.hugepages_total", hugepages_total as f64));
+        metrics.push(g("system.memory.hugepages_free", hugepages_free as f64));
+
+        metrics
+    }
+
+    // ---- Disk collection ----
+
+    /// Read disk snapshots from /proc/diskstats.
+    fn read_disk_snapshots() -> Vec<DiskSnapshot> {
+        let content = match fs::read_to_string("/proc/diskstats") {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        content.lines()
+            .filter_map(DiskSnapshot::parse)
+            .filter(|d| d.is_whole_disk())
+            .collect()
+    }
+
+    /// Collect disk I/O metrics.
+    fn collect_disk(&self) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(32);
+        let elapsed_secs = {
+            let prev = self.prev_time.read();
+            prev.elapsed().as_secs_f64()
+        };
+
+        let current_disks = Self::read_disk_snapshots();
+        let prev_disks = self.prev_disk.read();
+
+        for disk in &current_disks {
+            // Filter by configured mounts if any
+            if !self.config.disk_mounts.is_empty() {
+                let matches = self.config.disk_mounts.iter().any(|m| disk.device.contains(m.as_str()));
+                if !matches {
+                    continue;
+                }
+            }
+
+            let dev = disk.device.as_str();
+            let labels: [(&str, &str); 1] = [("device", dev)];
+
+            let gd = |name: &str, val: f64| -> Metric {
+                self.build_metric_with_labels(name, MetricValue::Gauge(val), MetricCategory::DiskIo, &labels)
+            };
+
+            // Current I/Os in progress (absolute, not delta)
+            metrics.push(gd("system.disk.ios_in_progress", disk.ios_in_progress as f64));
+
+            // Delta-based metrics
+            if let Some(prev) = prev_disks.get(&disk.device) {
+                if elapsed_secs > 0.0 {
+                    let reads_delta = disk.reads_completed.saturating_sub(prev.reads_completed);
+                    let writes_delta = disk.writes_completed.saturating_sub(prev.writes_completed);
+                    let read_bytes_delta = disk.sectors_read.saturating_sub(prev.sectors_read) * DiskSnapshot::SECTOR_SIZE;
+                    let write_bytes_delta = disk.sectors_written.saturating_sub(prev.sectors_written) * DiskSnapshot::SECTOR_SIZE;
+                    let io_time_delta = disk.io_time_ms.saturating_sub(prev.io_time_ms);
+                    let weighted_delta = disk.weighted_io_time_ms.saturating_sub(prev.weighted_io_time_ms);
+
+                    metrics.push(gd("system.disk.reads_per_sec", reads_delta as f64 / elapsed_secs));
+                    metrics.push(gd("system.disk.writes_per_sec", writes_delta as f64 / elapsed_secs));
+                    metrics.push(gd("system.disk.read_bytes_per_sec", read_bytes_delta as f64 / elapsed_secs));
+                    metrics.push(gd("system.disk.write_bytes_per_sec", write_bytes_delta as f64 / elapsed_secs));
+                    metrics.push(gd("system.disk.io_time_ms", io_time_delta as f64));
+                    metrics.push(gd("system.disk.weighted_io_time_ms", weighted_delta as f64));
+
+                    // Utilization: io_time_delta_ms / (elapsed_ms) * 100
+                    let elapsed_ms = (elapsed_secs * 1000.0) as u64;
+                    let util = if elapsed_ms > 0 {
+                        (io_time_delta as f64 / elapsed_ms as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+                    metrics.push(gd("system.disk.utilization_percent", util.min(100.0)));
+                }
+            }
+
+            // Cumulative counters
+            metrics.push(self.build_metric_with_labels(
+                "system.disk.reads_total", MetricValue::Counter(disk.reads_completed),
+                MetricCategory::DiskIo, &labels,
+            ));
+            metrics.push(self.build_metric_with_labels(
+                "system.disk.writes_total", MetricValue::Counter(disk.writes_completed),
+                MetricCategory::DiskIo, &labels,
+            ));
+        }
+
+        // Filesystem space via statvfs()
+        let mount_paths = if self.config.disk_mounts.is_empty() {
+            // Read /proc/mounts for real filesystems
+            Self::read_mount_points()
+        } else {
+            self.config.disk_mounts.clone()
+        };
+
+        for mount in &mount_paths {
+            let c_path = match std::ffi::CString::new(mount.as_str()) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+            let ret = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+            if ret != 0 {
+                continue;
+            }
+
+            let block_size = stat.f_frsize as u64;
+            let total = stat.f_blocks as u64 * block_size;
+            let free = stat.f_bfree as u64 * block_size;
+            let avail = stat.f_bavail as u64 * block_size;
+            let used = total.saturating_sub(free);
+            let usage_pct = if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
+
+            let inodes_total = stat.f_files as u64;
+            let inodes_free = stat.f_ffree as u64;
+            let inodes_used = inodes_total.saturating_sub(inodes_free);
+
+            let labels: [(&str, &str); 1] = [("mount", mount.as_str())];
+            let gf = |name: &str, val: f64| -> Metric {
+                self.build_metric_with_labels(name, MetricValue::Gauge(val), MetricCategory::DiskSpace, &labels)
+            };
+
+            metrics.push(gf("system.fs.total_bytes", total as f64));
+            metrics.push(gf("system.fs.used_bytes", used as f64));
+            metrics.push(gf("system.fs.free_bytes", free as f64));
+            metrics.push(gf("system.fs.available_bytes", avail as f64));
+            metrics.push(gf("system.fs.usage_percent", usage_pct));
+            metrics.push(gf("system.fs.inodes_total", inodes_total as f64));
+            metrics.push(gf("system.fs.inodes_used", inodes_used as f64));
+            metrics.push(gf("system.fs.inodes_free", inodes_free as f64));
+        }
+
+        // Update previous snapshots
+        drop(prev_disks);
+        let mut prev = self.prev_disk.write();
+        prev.clear();
+        for disk in current_disks {
+            prev.insert(disk.device.clone(), disk);
+        }
+
+        metrics
+    }
+
+    /// Read real mount points from /proc/mounts (skip virtual filesystems).
+    fn read_mount_points() -> Vec<String> {
+        let content = match fs::read_to_string("/proc/mounts") {
+            Ok(c) => c,
+            Err(_) => return vec!["/".to_string()],
+        };
+
+        let virtual_fs = ["proc", "sysfs", "devtmpfs", "tmpfs", "cgroup", "cgroup2",
+            "pstore", "mqueue", "hugetlbfs", "debugfs", "tracefs", "securityfs",
+            "configfs", "fusectl", "binfmt_misc", "devpts", "autofs", "overlay",
+            "squashfs", "nsfs", "rpc_pipefs", "nfsd", "fuse.lxcfs"];
+
+        content.lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let fstype = parts[2];
+                    let mountpoint = parts[1];
+                    if !virtual_fs.contains(&fstype) && !mountpoint.starts_with("/proc")
+                        && !mountpoint.starts_with("/sys") && !mountpoint.starts_with("/dev/")
+                        && !mountpoint.starts_with("/run") && !mountpoint.starts_with("/snap")
+                    {
+                        return Some(mountpoint.to_string());
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    // ---- Network collection ----
+
+    /// Read network interface snapshots from /proc/net/dev.
+    fn read_net_snapshots() -> Vec<NetIfSnapshot> {
+        let content = match fs::read_to_string("/proc/net/dev") {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        content.lines()
+            .skip(2) // Skip header lines
+            .filter_map(NetIfSnapshot::parse)
+            .collect()
+    }
+
+    /// Collect network interface metrics.
+    fn collect_network(&self) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(32);
+        let elapsed_secs = {
+            let prev = self.prev_time.read();
+            prev.elapsed().as_secs_f64()
+        };
+
+        let current_ifaces = Self::read_net_snapshots();
+        let prev_ifaces = self.prev_net.read();
+
+        for iface in &current_ifaces {
+            // Filter by configured interfaces if any
+            if !self.config.network_interfaces.is_empty() {
+                let matches = self.config.network_interfaces.iter().any(|i| iface.interface == i.as_str());
+                if !matches {
+                    continue;
+                }
+            }
+
+            let if_name = iface.interface.as_str();
+            let labels: [(&str, &str); 1] = [("interface", if_name)];
+
+            // Cumulative counters
+            let cn = |name: &str, val: u64| -> Metric {
+                self.build_metric_with_labels(name, MetricValue::Counter(val), MetricCategory::NetworkTraffic, &labels)
+            };
+
+            metrics.push(cn("system.net.rx_bytes_total", iface.rx_bytes));
+            metrics.push(cn("system.net.tx_bytes_total", iface.tx_bytes));
+            metrics.push(cn("system.net.rx_packets_total", iface.rx_packets));
+            metrics.push(cn("system.net.tx_packets_total", iface.tx_packets));
+            metrics.push(cn("system.net.rx_errors_total", iface.rx_errors));
+            metrics.push(cn("system.net.tx_errors_total", iface.tx_errors));
+            metrics.push(cn("system.net.rx_drops_total", iface.rx_drops));
+            metrics.push(cn("system.net.tx_drops_total", iface.tx_drops));
+
+            // Delta-based rate metrics
+            if let Some(prev) = prev_ifaces.get(&iface.interface) {
+                if elapsed_secs > 0.0 {
+                    let gn = |name: &str, val: f64| -> Metric {
+                        self.build_metric_with_labels(name, MetricValue::Gauge(val), MetricCategory::NetworkTraffic, &labels)
+                    };
+
+                    metrics.push(gn("system.net.rx_bytes_per_sec",
+                        iface.rx_bytes.saturating_sub(prev.rx_bytes) as f64 / elapsed_secs));
+                    metrics.push(gn("system.net.tx_bytes_per_sec",
+                        iface.tx_bytes.saturating_sub(prev.tx_bytes) as f64 / elapsed_secs));
+                    metrics.push(gn("system.net.rx_packets_per_sec",
+                        iface.rx_packets.saturating_sub(prev.rx_packets) as f64 / elapsed_secs));
+                    metrics.push(gn("system.net.tx_packets_per_sec",
+                        iface.tx_packets.saturating_sub(prev.tx_packets) as f64 / elapsed_secs));
+                    metrics.push(gn("system.net.rx_errors_per_sec",
+                        iface.rx_errors.saturating_sub(prev.rx_errors) as f64 / elapsed_secs));
+                    metrics.push(gn("system.net.tx_errors_per_sec",
+                        iface.tx_errors.saturating_sub(prev.tx_errors) as f64 / elapsed_secs));
+
+                    // Bandwidth in bits per second
+                    let rx_bps = (iface.rx_bytes.saturating_sub(prev.rx_bytes) as f64 * 8.0) / elapsed_secs;
+                    let tx_bps = (iface.tx_bytes.saturating_sub(prev.tx_bytes) as f64 * 8.0) / elapsed_secs;
+                    metrics.push(gn("system.net.rx_bits_per_sec", rx_bps));
+                    metrics.push(gn("system.net.tx_bits_per_sec", tx_bps));
+                }
+            }
+        }
+
+        // Update previous snapshots
+        drop(prev_ifaces);
+        let mut prev = self.prev_net.write();
+        prev.clear();
+        for iface in current_ifaces {
+            prev.insert(iface.interface.clone(), iface);
+        }
+
+        metrics
+    }
+
+    // ---- Misc system metrics ----
+
+    /// Collect miscellaneous system metrics: uptime, file descriptors, vmstat.
+    fn collect_misc(&self) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(8);
+
+        // Uptime from /proc/uptime
+        if let Ok(uptime_str) = fs::read_to_string("/proc/uptime") {
+            let parts: Vec<&str> = uptime_str.split_whitespace().collect();
+            if let Some(uptime) = parts.first().and_then(|s| s.parse::<f64>().ok()) {
+                metrics.push(self.build_metric(
+                    "system.uptime_seconds", MetricValue::Gauge(uptime), MetricCategory::Availability,
+                ));
+            }
+        }
+
+        // File handles from /proc/sys/fs/file-nr
+        if let Ok(file_nr) = fs::read_to_string("/proc/sys/fs/file-nr") {
+            let parts: Vec<&str> = file_nr.split_whitespace().collect();
+            if parts.len() >= 3 {
+                if let Ok(allocated) = parts[0].parse::<f64>() {
+                    metrics.push(self.build_metric(
+                        "system.fs.file_handles_allocated", MetricValue::Gauge(allocated), MetricCategory::SystemResource,
+                    ));
+                }
+                if let Ok(max) = parts[2].parse::<f64>() {
+                    metrics.push(self.build_metric(
+                        "system.fs.file_handles_max", MetricValue::Gauge(max), MetricCategory::SystemResource,
+                    ));
+                }
+            }
+        }
+
+        // VMStat selected fields
+        if let Ok(vmstat) = fs::read_to_string("/proc/vmstat") {
+            for line in vmstat.lines() {
+                let mut parts = line.split_whitespace();
+                let key = match parts.next() { Some(k) => k, None => continue };
+                let val: u64 = match parts.next().and_then(|s| s.parse().ok()) { Some(v) => v, None => continue };
+
+                match key {
+                    "pgpgin" => metrics.push(self.build_metric(
+                        "system.vm.pgpgin", MetricValue::Counter(val), MetricCategory::MemoryUsage)),
+                    "pgpgout" => metrics.push(self.build_metric(
+                        "system.vm.pgpgout", MetricValue::Counter(val), MetricCategory::MemoryUsage)),
+                    "pswpin" => metrics.push(self.build_metric(
+                        "system.vm.pswpin", MetricValue::Counter(val), MetricCategory::MemoryUsage)),
+                    "pswpout" => metrics.push(self.build_metric(
+                        "system.vm.pswpout", MetricValue::Counter(val), MetricCategory::MemoryUsage)),
+                    "oom_kill" => metrics.push(self.build_metric(
+                        "system.vm.oom_kill", MetricValue::Counter(val), MetricCategory::MemoryPressure)),
+                    _ => {}
+                }
+            }
+        }
+
+        metrics
+    }
+
+    /// Run a single collection cycle, gathering all configured metrics.
+    fn collect_all(&self) -> Vec<Metric> {
+        let mut all_metrics = Vec::with_capacity(128);
+
+        if self.config.collect_cpu {
+            all_metrics.extend(self.collect_cpu());
+        }
+        if self.config.collect_memory {
+            all_metrics.extend(self.collect_memory());
+        }
+        if self.config.collect_disk {
+            all_metrics.extend(self.collect_disk());
+        }
+        if self.config.collect_network {
+            all_metrics.extend(self.collect_network());
+        }
+        all_metrics.extend(self.collect_misc());
+
+        // Update the previous timestamp AFTER all collections
+        *self.prev_time.write() = Instant::now();
+
+        all_metrics
+    }
+}
+
+#[async_trait]
+impl Collector for SystemCollector {
+    fn name(&self) -> &str {
+        "system"
+    }
+
+    fn collector_type(&self) -> CollectorType {
+        CollectorType::System
+    }
+
+    async fn init(&mut self) -> CollectorResult<()> {
+        // Prime the snapshots so first real collection has deltas
+        *self.prev_cpu.write() = Self::read_cpu_snapshots();
+        let disks = Self::read_disk_snapshots();
+        {
+            let mut prev = self.prev_disk.write();
+            for disk in disks {
+                prev.insert(disk.device.clone(), disk);
+            }
+        }
+        let ifaces = Self::read_net_snapshots();
+        {
+            let mut prev = self.prev_net.write();
+            for iface in ifaces {
+                prev.insert(iface.interface.clone(), iface);
+            }
+        }
+        *self.prev_time.write() = Instant::now();
+
+        info!(target: "cerebro::collector::system", "System collector initialized, hostname={}", self.hostname);
+        Ok(())
+    }
+
+    async fn start(&mut self, tx: MetricSender) -> CollectorResult<()> {
+        self.base.set_sender(tx);
+        self.base.set_running(true);
+
+        let interval_dur = self.base.interval;
+        let shutdown = self.base.shutdown_signal();
+
+        // We need to share self's data with the spawned task.
+        // Use Arc references for the shared state pieces.
+        let config = self.config.clone();
+        let hostname = self.hostname.clone();
+        let prev_cpu = Arc::new(RwLock::new(self.prev_cpu.read().clone()));
+        let prev_disk = Arc::new(RwLock::new(self.prev_disk.read().clone()));
+        let prev_net = Arc::new(RwLock::new(self.prev_net.read().clone()));
+        let prev_time = Arc::new(RwLock::new(Instant::now()));
+        let sender = self.base.get_sender().cloned();
+        let base_stats = Arc::new(AtomicU64::new(0)); // metrics counter
+        let base_cycles = Arc::new(AtomicU64::new(0));
+        let base_errors = Arc::new(AtomicU64::new(0));
+
+        let handle = tokio::spawn(async move {
+            let mut tick = interval(interval_dur);
+            // Skip the first immediate tick to let deltas build
+            tick.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        let start = Instant::now();
+
+                        // Create a temporary collector context for this cycle
+                        let mut cycle_metrics = Vec::with_capacity(128);
+
+                        // ---- CPU ----
+                        if config.collect_cpu {
+                            let current_snapshots = SystemCollector::read_cpu_snapshots();
+                            let prev_snaps = prev_cpu.read().clone();
+                            if !prev_snaps.is_empty() && prev_snaps.len() == current_snapshots.len() {
+                                for (curr, prev) in current_snapshots.iter().zip(prev_snaps.iter()) {
+                                    let pcts = curr.compute_percentages(prev);
+                                    let is_agg = curr.core_id == "cpu";
+                                    let core_label = if is_agg { "total".to_string() } else { curr.core_id.to_string() };
+
+                                    let mut mk = |name: &str, val: f64| {
+                                        let m = Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                                            .with_source(MetricSource::System { subsystem: SystemSubsystem::Cpu })
+                                            .with_category(MetricCategory::CpuUsage)
+                                            .with_label("host", hostname.as_str()).with_label("core", core_label.as_str()).with_priority(Priority::Normal);
+                                        cycle_metrics.push(m);
+                                    };
+
+                                    mk("system.cpu.usage_percent", pcts.usage);
+                                    mk("system.cpu.user_percent", pcts.user);
+                                    mk("system.cpu.system_percent", pcts.system);
+                                    mk("system.cpu.idle_percent", pcts.idle);
+                                    mk("system.cpu.iowait_percent", pcts.iowait);
+                                    mk("system.cpu.steal_percent", pcts.steal);
+                                }
+                            }
+                            *prev_cpu.write() = current_snapshots;
+
+                            // Load averages
+                            if let Ok(la) = fs::read_to_string("/proc/loadavg") {
+                                let p: Vec<&str> = la.split_whitespace().collect();
+                                if p.len() >= 3 {
+                                    for (i, name) in [(0, "system.load.1m"), (1, "system.load.5m"), (2, "system.load.15m")] {
+                                        if let Ok(v) = p[i].parse::<f64>() {
+                                            cycle_metrics.push(Metric::new(CompactString::from(name), MetricValue::Gauge(v))
+                                                .with_source(MetricSource::System { subsystem: SystemSubsystem::Cpu })
+                                                .with_category(MetricCategory::CpuUsage)
+                                                .with_label("host", hostname.as_str()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- Memory ----
+                        if config.collect_memory {
+                            if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+                                let mut vals = HashMap::new();
+                                for line in content.lines() {
+                                    let mut parts = line.splitn(2, ':');
+                                    if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
+                                        let kb: u64 = v.trim().split_whitespace().next()
+                                            .and_then(|s| s.parse().ok()).unwrap_or(0);
+                                        vals.insert(k.trim().to_string(), kb * 1024);
+                                    }
+                                }
+                                let total = *vals.get("MemTotal").unwrap_or(&0);
+                                let avail = *vals.get("MemAvailable").unwrap_or(&0);
+                                let free = *vals.get("MemFree").unwrap_or(&0);
+                                let used = total.saturating_sub(avail);
+                                let pct = if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
+
+                                let mut mk = |name: &str, val: f64| {
+                                    cycle_metrics.push(Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                                        .with_source(MetricSource::System { subsystem: SystemSubsystem::Cpu })
+                                        .with_category(MetricCategory::MemoryUsage)
+                                        .with_label("host", hostname.as_str()));
+                                };
+                                mk("system.memory.total_bytes", total as f64);
+                                mk("system.memory.used_bytes", used as f64);
+                                mk("system.memory.free_bytes", free as f64);
+                                mk("system.memory.available_bytes", avail as f64);
+                                mk("system.memory.usage_percent", pct);
+                                mk("system.memory.cached_bytes", *vals.get("Cached").unwrap_or(&0) as f64);
+                                mk("system.memory.buffers_bytes", *vals.get("Buffers").unwrap_or(&0) as f64);
+
+                                let st = *vals.get("SwapTotal").unwrap_or(&0);
+                                let sf = *vals.get("SwapFree").unwrap_or(&0);
+                                let su = st.saturating_sub(sf);
+                                mk("system.memory.swap_total_bytes", st as f64);
+                                mk("system.memory.swap_used_bytes", su as f64);
+                                if st > 0 {
+                                    mk("system.memory.swap_percent", (su as f64 / st as f64) * 100.0);
+                                }
+                            }
+                        }
+
+                        // ---- Disk ----
+                        if config.collect_disk {
+                            let elapsed_s = prev_time.read().elapsed().as_secs_f64();
+                            let disks = SystemCollector::read_disk_snapshots();
+                            let pd = prev_disk.read().clone();
+                            for disk in &disks {
+                                let dev = disk.device.as_str();
+                                if let Some(prev) = pd.get(&disk.device) {
+                                    if elapsed_s > 0.0 {
+                                        let read_bps = (disk.sectors_read.saturating_sub(prev.sectors_read) * DiskSnapshot::SECTOR_SIZE) as f64 / elapsed_s;
+                                        let write_bps = (disk.sectors_written.saturating_sub(prev.sectors_written) * DiskSnapshot::SECTOR_SIZE) as f64 / elapsed_s;
+                                        let io_delta = disk.io_time_ms.saturating_sub(prev.io_time_ms);
+                                        let util = ((io_delta as f64) / (elapsed_s * 1000.0) * 100.0).min(100.0);
+
+                                        let mut mk = |name: &str, val: f64| {
+                                            cycle_metrics.push(Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                                                .with_source(MetricSource::System { subsystem: SystemSubsystem::Cpu })
+                                                .with_category(MetricCategory::DiskIo)
+                                                .with_label("host", hostname.as_str()).with_label("device", dev));
+                                        };
+                                        mk("system.disk.read_bytes_per_sec", read_bps);
+                                        mk("system.disk.write_bytes_per_sec", write_bps);
+                                        mk("system.disk.utilization_percent", util);
+                                    }
+                                }
+                            }
+                            let mut pdw = prev_disk.write();
+                            pdw.clear();
+                            for d in disks { pdw.insert(d.device.clone(), d); }
+                        }
+
+                        // ---- Network ----
+                        if config.collect_network {
+                            let elapsed_s = prev_time.read().elapsed().as_secs_f64();
+                            let ifaces = SystemCollector::read_net_snapshots();
+                            let pn = prev_net.read().clone();
+                            for iface in &ifaces {
+                                let ifn = iface.interface.as_str();
+                                if let Some(prev) = pn.get(&iface.interface) {
+                                    if elapsed_s > 0.0 {
+                                        let mut mk = |name: &str, val: f64| {
+                                            cycle_metrics.push(Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                                                .with_source(MetricSource::System { subsystem: SystemSubsystem::Cpu })
+                                                .with_category(MetricCategory::NetworkTraffic)
+                                                .with_label("host", hostname.as_str()).with_label("interface", ifn));
+                                        };
+                                        mk("system.net.rx_bytes_per_sec", iface.rx_bytes.saturating_sub(prev.rx_bytes) as f64 / elapsed_s);
+                                        mk("system.net.tx_bytes_per_sec", iface.tx_bytes.saturating_sub(prev.tx_bytes) as f64 / elapsed_s);
+                                        mk("system.net.rx_packets_per_sec", iface.rx_packets.saturating_sub(prev.rx_packets) as f64 / elapsed_s);
+                                        mk("system.net.tx_packets_per_sec", iface.tx_packets.saturating_sub(prev.tx_packets) as f64 / elapsed_s);
+                                    }
+                                }
+                            }
+                            let mut pnw = prev_net.write();
+                            pnw.clear();
+                            for i in ifaces { pnw.insert(i.interface.clone(), i); }
+                        }
+
+                        *prev_time.write() = Instant::now();
+
+                        // Send all collected metrics
+                        let count = cycle_metrics.len() as u64;
+                        if let Some(ref tx) = sender {
+                            for m in cycle_metrics {
+                                let _ = tx.send(m);
+                            }
+                        }
+                        base_stats.fetch_add(count, AtomicOrdering::Relaxed);
+                        base_cycles.fetch_add(1, AtomicOrdering::Relaxed);
+
+                        trace!(target: "cerebro::collector::system",
+                            metrics = count,
+                            duration_us = start.elapsed().as_micros() as u64,
+                            "System collection cycle complete"
+                        );
+                    }
+                    _ = shutdown.notified() => {
+                        info!(target: "cerebro::collector::system", "System collector shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        *self.task_handle.lock().await = Some(handle);
+        info!(target: "cerebro::collector::system", interval_ms = interval_dur.as_millis() as u64, "System collector started");
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> CollectorResult<()> {
+        self.base.signal_shutdown();
+        self.base.set_running(false);
+
+        if let Some(handle) = self.task_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+
+        info!(target: "cerebro::collector::system", "System collector stopped");
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+
+    fn health(&self) -> CollectorHealth {
+        self.base.health()
+    }
+
+    fn stats(&self) -> CollectorStats {
+        self.base.stats()
+    }
+
+    fn get_sender(&self) -> CollectorResult<MetricSender> {
+        self.base.get_sender().cloned().ok_or_else(|| CollectorError::CollectionFailed {
+            source: "system".to_string(),
+            message: "collector not running".to_string(),
+        })
+    }
+
+    fn interval(&self) -> Duration {
+        self.base.interval
+    }
+
+    fn set_interval(&mut self, interval: Duration) {
+        self.base.interval = interval;
+    }
+}
+
+
+// ============================================================================
+// SECTION 29: NETDATA COLLECTOR
+// ============================================================================
+// Integrates with a running Netdata instance via its REST API.
+// Pulls all metrics via /api/v1/allmetrics and maps Netdata chart families
+// to Cerebro metric categories.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 29.1 Netdata Chart-to-Category Mapper
+// ----------------------------------------------------------------------------
+
+/// Maps Netdata chart families/types to Cerebro metric categories.
+struct NetdataChartMapper;
+
+impl NetdataChartMapper {
+    /// Map a Netdata chart family to a Cerebro metric category.
+    fn map_family(family: &str) -> MetricCategory {
+        let f = family.to_lowercase();
+
+        if f.contains("cpu") { return MetricCategory::CpuUsage; }
+        if f.contains("mem") || f.contains("ram") { return MetricCategory::MemoryUsage; }
+        if f.contains("disk") || f.contains("mount") { return MetricCategory::DiskIo; }
+        if f.contains("net") || f.contains("eth") || f.contains("wlan") { return MetricCategory::NetworkTraffic; }
+        if f.contains("swap") { return MetricCategory::MemoryUsage; }
+        if f.contains("load") { return MetricCategory::CpuUsage; }
+        if f.contains("uptime") { return MetricCategory::Availability; }
+        if f.contains("process") || f.contains("proc") { return MetricCategory::ProcessCount; }
+        if f.contains("socket") || f.contains("tcp") || f.contains("udp") { return MetricCategory::NetworkConnections; }
+        if f.contains("postgres") || f.contains("mysql") || f.contains("redis") { return MetricCategory::DatabaseConnections; }
+        if f.contains("docker") || f.contains("container") { return MetricCategory::ContainerCpu; }
+        if f.contains("nginx") || f.contains("apache") { return MetricCategory::HttpRequestRate; }
+        if f.contains("entropy") { return MetricCategory::SystemResource; }
+
+        MetricCategory::Custom
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 29.2 Netdata Collector Implementation
+// ----------------------------------------------------------------------------
+
+/// Collector that integrates with a Netdata monitoring instance.
+///
+/// Polls the Netdata REST API at configurable intervals and translates
+/// all chart data into Cerebro metrics with proper categorization.
+pub struct NetdataCollector {
+    /// Base collector for lifecycle management
+    base: BaseCollector,
+    /// Configuration
+    config: NetdataCollectorConfig,
+    /// HTTP client with connection pooling
+    client: HttpClient,
+    /// Tokio task handle
+    task_handle: TokioMutex<Option<TokioJoinHandle<()>>>,
+    /// Hostname label
+    hostname: CompactString,
+}
+
+impl NetdataCollector {
+    /// Create a new Netdata collector.
+    pub fn new(config: NetdataCollectorConfig) -> Self {
+        let interval = if config.interval_ms > 0 {
+            Duration::from_millis(config.interval_ms)
+        } else {
+            Duration::from_secs(1)
+        };
+
+        let client = HttpClient::builder()
+            .timeout(Duration::from_secs(config.timeout_secs))
+            .pool_max_idle_per_host(2)
+            .build()
+            .unwrap_or_default();
+
+        let hostname = fs::read_to_string("/etc/hostname")
+            .map(|s| CompactString::from(s.trim()))
+            .unwrap_or_else(|_| CompactString::from("unknown"));
+
+        Self {
+            base: BaseCollector::new("netdata", CollectorType::Netdata)
+                .with_interval(interval),
+            config,
+            client,
+            task_handle: TokioMutex::new(None),
+            hostname,
+        }
+    }
+
+    /// Fetch all metrics from Netdata API.
+    async fn fetch_metrics(
+        client: &HttpClient,
+        base_url: &str,
+        hostname: &str,
+        exclude_patterns: &[String],
+    ) -> Result<Vec<Metric>, String> {
+        let url = format!("{}/api/v1/allmetrics?format=json", base_url);
+
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Netdata API returned status {}", response.status()));
+        }
+
+        let body: JsonValue = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+
+        let mut metrics = Vec::new();
+
+        // Netdata allmetrics format: { "chart_id": { "name": ..., "family": ..., "dimensions": { "dim_name": { "value": ... } } } }
+        if let Some(charts) = body.as_object() {
+            for (chart_id, chart_data) in charts {
+                // Check exclusion patterns
+                let should_exclude = exclude_patterns.iter().any(|pat| {
+                    Regex::new(pat).map_or(false, |re| re.is_match(chart_id))
+                });
+                if should_exclude {
+                    continue;
+                }
+
+                let family = chart_data.get("family")
+                    .and_then(|f| f.as_str())
+                    .unwrap_or("unknown");
+                let chart_name = chart_data.get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or(chart_id);
+                let units = chart_data.get("units")
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("");
+
+                let category = NetdataChartMapper::map_family(family);
+
+                if let Some(dimensions) = chart_data.get("dimensions").and_then(|d| d.as_object()) {
+                    for (dim_name, dim_data) in dimensions {
+                        let value = dim_data.get("value")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+
+                        let metric_name = format!("netdata.{}.{}", chart_id, dim_name);
+
+                        let metric = Metric::new(
+                            CompactString::from(&metric_name),
+                            MetricValue::Gauge(value),
+                        )
+                        .with_source(MetricSource::Netdata {
+                            chart: CompactString::from(chart_name),
+                            dimension: CompactString::from(dim_name.as_str()),
+                            chart_type: CompactString::from(family),
+                        })
+                        .with_category(category)
+                        .with_label("host", hostname)
+                        .with_label("chart", chart_name)
+                        .with_label("family", family)
+                        .with_label("dimension", dim_name)
+                        .with_label("units", units)
+                        .with_priority(Priority::Normal);
+
+                        metrics.push(metric);
+                    }
+                }
+            }
+        }
+
+        Ok(metrics)
+    }
+}
+
+#[async_trait]
+impl Collector for NetdataCollector {
+    fn name(&self) -> &str {
+        "netdata"
+    }
+
+    fn collector_type(&self) -> CollectorType {
+        CollectorType::Netdata
+    }
+
+    async fn init(&mut self) -> CollectorResult<()> {
+        // Verify connectivity to Netdata
+        let url = format!("{}/api/v1/info", self.config.url);
+        match self.client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                info!(target: "cerebro::collector::netdata",
+                    url = %self.config.url, "Netdata connection verified");
+                Ok(())
+            }
+            Ok(resp) => {
+                warn!(target: "cerebro::collector::netdata",
+                    url = %self.config.url, status = %resp.status(),
+                    "Netdata returned non-success status, will retry on collection");
+                Ok(())
+            }
+            Err(e) => {
+                warn!(target: "cerebro::collector::netdata",
+                    url = %self.config.url, error = %e,
+                    "Cannot reach Netdata, will retry on collection");
+                Ok(())
+            }
+        }
+    }
+
+    async fn start(&mut self, tx: MetricSender) -> CollectorResult<()> {
+        self.base.set_sender(tx.clone());
+        self.base.set_running(true);
+
+        let interval_dur = self.base.interval;
+        let shutdown = self.base.shutdown_signal();
+        let client = self.client.clone();
+        let base_url = self.config.url.clone();
+        let hostname = self.hostname.clone();
+        let exclude = self.config.exclude_patterns.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut tick = interval(interval_dur);
+
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        let start = Instant::now();
+
+                        match NetdataCollector::fetch_metrics(&client, &base_url, &hostname, &exclude).await {
+                            Ok(metrics) => {
+                                let count = metrics.len();
+                                for m in metrics {
+                                    let _ = tx.send(m);
+                                }
+                                trace!(target: "cerebro::collector::netdata",
+                                    metrics = count,
+                                    duration_us = start.elapsed().as_micros() as u64,
+                                    "Netdata collection cycle complete"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(target: "cerebro::collector::netdata", error = %e, "Collection failed");
+                            }
+                        }
+                    }
+                    _ = shutdown.notified() => {
+                        info!(target: "cerebro::collector::netdata", "Netdata collector shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        *self.task_handle.lock().await = Some(handle);
+        info!(target: "cerebro::collector::netdata",
+            url = %self.config.url, interval_ms = interval_dur.as_millis() as u64,
+            "Netdata collector started");
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> CollectorResult<()> {
+        self.base.signal_shutdown();
+        self.base.set_running(false);
+        if let Some(handle) = self.task_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+        info!(target: "cerebro::collector::netdata", "Netdata collector stopped");
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool { self.base.is_running() }
+    fn health(&self) -> CollectorHealth { self.base.health() }
+    fn stats(&self) -> CollectorStats { self.base.stats() }
+
+    fn get_sender(&self) -> CollectorResult<MetricSender> {
+        self.base.get_sender().cloned().ok_or_else(|| CollectorError::CollectionFailed {
+            source: "netdata".to_string(),
+            message: "collector not running".to_string(),
+        })
+    }
+
+    fn interval(&self) -> Duration { self.base.interval }
+    fn set_interval(&mut self, interval: Duration) { self.base.interval = interval; }
+}
+
+
+// ============================================================================
+// SECTION 30: DOCKER COLLECTOR
+// ============================================================================
+// Collects container metrics via the Docker Engine API over Unix socket.
+// Supports container enumeration, CPU/memory/network/IO stats per container.
+// Auto-classifies containers into projects using labels and name patterns.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 30.1 Docker API Response Types
+// ----------------------------------------------------------------------------
+
+/// Docker container list entry (from GET /containers/json).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DockerContainer {
+    id: String,
+    names: Vec<String>,
+    image: String,
+    state: String,
+    status: String,
+    #[serde(default)]
+    labels: HashMap<String, String>,
+}
+
+impl DockerContainer {
+    /// Get the clean container name (strip leading '/').
+    fn clean_name(&self) -> &str {
+        self.names.first()
+            .map(|n| n.trim_start_matches('/'))
+            .unwrap_or(&self.id[..12])
+    }
+
+    /// Get the short container ID (12 chars).
+    fn short_id(&self) -> &str {
+        if self.id.len() >= 12 { &self.id[..12] } else { &self.id }
+    }
+}
+
+/// Docker container stats response (from GET /containers/{id}/stats?stream=false).
+#[derive(Debug, Clone, Deserialize)]
+struct DockerStats {
+    /// CPU stats
+    #[serde(default)]
+    cpu_stats: DockerCpuStats,
+    /// Previous CPU stats (for delta computation)
+    #[serde(default)]
+    precpu_stats: DockerCpuStats,
+    /// Memory stats
+    #[serde(default)]
+    memory_stats: DockerMemoryStats,
+    /// Network stats (per-network)
+    #[serde(default)]
+    networks: Option<HashMap<String, DockerNetworkStats>>,
+    /// Block I/O stats
+    #[serde(default)]
+    blkio_stats: DockerBlkioStats,
+    /// PIDs stats
+    #[serde(default)]
+    pids_stats: DockerPidsStats,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerCpuStats {
+    #[serde(default)]
+    cpu_usage: DockerCpuUsage,
+    #[serde(default)]
+    system_cpu_usage: Option<u64>,
+    #[serde(default)]
+    online_cpus: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerCpuUsage {
+    #[serde(default)]
+    total_usage: u64,
+    #[serde(default)]
+    usage_in_kernelmode: u64,
+    #[serde(default)]
+    usage_in_usermode: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerMemoryStats {
+    #[serde(default)]
+    usage: u64,
+    #[serde(default)]
+    max_usage: u64,
+    #[serde(default)]
+    limit: u64,
+    #[serde(default)]
+    stats: Option<DockerMemoryDetailStats>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerMemoryDetailStats {
+    #[serde(default)]
+    cache: u64,
+    #[serde(default)]
+    rss: u64,
+    #[serde(default)]
+    mapped_file: u64,
+    #[serde(default)]
+    pgfault: u64,
+    #[serde(default)]
+    pgmajfault: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerNetworkStats {
+    #[serde(default)]
+    rx_bytes: u64,
+    #[serde(default)]
+    rx_packets: u64,
+    #[serde(default)]
+    rx_errors: u64,
+    #[serde(default)]
+    rx_dropped: u64,
+    #[serde(default)]
+    tx_bytes: u64,
+    #[serde(default)]
+    tx_packets: u64,
+    #[serde(default)]
+    tx_errors: u64,
+    #[serde(default)]
+    tx_dropped: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerBlkioStats {
+    #[serde(default)]
+    io_service_bytes_recursive: Option<Vec<DockerBlkioEntry>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerBlkioEntry {
+    #[serde(default)]
+    op: String,
+    #[serde(default)]
+    value: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DockerPidsStats {
+    #[serde(default)]
+    current: Option<u64>,
+    #[serde(default)]
+    limit: Option<u64>,
+}
+
+// ----------------------------------------------------------------------------
+// 30.2 Docker HTTP Client (Unix Socket)
+// ----------------------------------------------------------------------------
+
+/// Minimal HTTP client for Docker Engine API over Unix socket.
+struct DockerClient {
+    socket_path: String,
+}
+
+impl DockerClient {
+    fn new(socket_path: &str) -> Self {
+        Self {
+            socket_path: socket_path.to_string(),
+        }
+    }
+
+    /// Send an HTTP GET request over the Unix socket.
+    async fn get(&self, path: &str) -> Result<String, String> {
+        let stream = UnixStream::connect(&self.socket_path)
+            .await
+            .map_err(|e| format!("Failed to connect to Docker socket: {}", e))?;
+
+        let request = format!(
+            "GET {} HTTP/1.0\r\nHost: localhost\r\n\r\n",
+            path
+        );
+
+        let (mut reader, mut writer) = stream.into_split();
+        writer.write_all(request.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to write request: {}", e))?;
+        writer.shutdown()
+            .await
+            .map_err(|e| format!("Failed to shutdown write: {}", e))?;
+
+        let mut response = Vec::new();
+        reader.read_to_end(&mut response)
+            .await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        let response_str = String::from_utf8_lossy(&response).to_string();
+
+        // Extract body from HTTP response (after \r\n\r\n)
+        if let Some(body_start) = response_str.find("\r\n\r\n") {
+            Ok(response_str[body_start + 4..].to_string())
+        } else {
+            Err("Invalid HTTP response from Docker".to_string())
+        }
+    }
+
+    /// List running containers.
+    async fn list_containers(&self) -> Result<Vec<DockerContainer>, String> {
+        let body = self.get("/containers/json").await?;
+        serde_json::from_str(&body).map_err(|e| format!("Failed to parse container list: {}", e))
+    }
+
+    /// Get stats for a container (one-shot, non-streaming).
+    async fn container_stats(&self, id: &str) -> Result<DockerStats, String> {
+        let path = format!("/containers/{}/stats?stream=false", id);
+        let body = self.get(&path).await?;
+        serde_json::from_str(&body).map_err(|e| format!("Failed to parse stats for {}: {}", id, e))
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 30.3 Docker Collector Implementation
+// ----------------------------------------------------------------------------
+
+/// Docker container metrics collector.
+///
+/// Connects to the Docker Engine API via Unix socket to collect
+/// CPU, memory, network, and I/O metrics per container.
+pub struct DockerCollector {
+    /// Base collector
+    base: BaseCollector,
+    /// Configuration
+    config: DockerCollectorConfig,
+    /// Task handle
+    task_handle: TokioMutex<Option<TokioJoinHandle<()>>>,
+    /// Hostname
+    hostname: CompactString,
+}
+
+impl DockerCollector {
+    /// Create a new Docker collector.
+    pub fn new(config: DockerCollectorConfig) -> Self {
+        let interval = if config.interval_ms > 0 {
+            Duration::from_millis(config.interval_ms)
+        } else {
+            Duration::from_secs(5) // Docker stats are heavier, use longer interval
+        };
+
+        let hostname = fs::read_to_string("/etc/hostname")
+            .map(|s| CompactString::from(s.trim()))
+            .unwrap_or_else(|_| CompactString::from("unknown"));
+
+        Self {
+            base: BaseCollector::new("docker", CollectorType::Docker)
+                .with_interval(interval),
+            config,
+            task_handle: TokioMutex::new(None),
+            hostname,
+        }
+    }
+
+    /// Convert Docker stats into Cerebro metrics for a single container.
+    fn stats_to_metrics(
+        stats: &DockerStats,
+        container_name: &str,
+        container_id: &str,
+        image: &str,
+        hostname: &str,
+    ) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(20);
+
+        let mk = |name: &str, val: f64, cat: MetricCategory| -> Metric {
+            Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                .with_source(MetricSource::Docker {
+                    container_id: CompactString::from(container_id),
+                    container_name: CompactString::from(container_name),
+                    stat_type: DockerStatType::Cpu,
+                })
+                .with_category(cat)
+                .with_label("host", hostname)
+                .with_label("container_name", container_name)
+                .with_label("container_id", container_id)
+                .with_label("image", image)
+                .with_priority(Priority::Normal)
+        };
+
+        // CPU usage percentage
+        let cpu_delta = stats.cpu_stats.cpu_usage.total_usage
+            .saturating_sub(stats.precpu_stats.cpu_usage.total_usage);
+        let system_delta = stats.cpu_stats.system_cpu_usage.unwrap_or(0)
+            .saturating_sub(stats.precpu_stats.system_cpu_usage.unwrap_or(0));
+        let num_cpus = stats.cpu_stats.online_cpus.unwrap_or(1) as f64;
+
+        let cpu_percent = if system_delta > 0 && cpu_delta > 0 {
+            (cpu_delta as f64 / system_delta as f64) * num_cpus * 100.0
+        } else {
+            0.0
+        };
+
+        metrics.push(mk("docker.cpu.usage_percent", cpu_percent, MetricCategory::ContainerCpu));
+        metrics.push(mk("docker.cpu.user_ns", stats.cpu_stats.cpu_usage.usage_in_usermode as f64, MetricCategory::ContainerCpu));
+        metrics.push(mk("docker.cpu.kernel_ns", stats.cpu_stats.cpu_usage.usage_in_kernelmode as f64, MetricCategory::ContainerCpu));
+
+        // Memory
+        let mem_usage = stats.memory_stats.usage;
+        let mem_limit = stats.memory_stats.limit;
+        let mem_percent = if mem_limit > 0 { (mem_usage as f64 / mem_limit as f64) * 100.0 } else { 0.0 };
+
+        metrics.push(mk("docker.memory.usage_bytes", mem_usage as f64, MetricCategory::ContainerMemory));
+        metrics.push(mk("docker.memory.limit_bytes", mem_limit as f64, MetricCategory::ContainerMemory));
+        metrics.push(mk("docker.memory.usage_percent", mem_percent, MetricCategory::ContainerMemory));
+        metrics.push(mk("docker.memory.max_usage_bytes", stats.memory_stats.max_usage as f64, MetricCategory::ContainerMemory));
+
+        if let Some(ref detail) = stats.memory_stats.stats {
+            metrics.push(mk("docker.memory.cache_bytes", detail.cache as f64, MetricCategory::ContainerMemory));
+            metrics.push(mk("docker.memory.rss_bytes", detail.rss as f64, MetricCategory::ContainerMemory));
+        }
+
+        // Network (aggregate across all networks)
+        if let Some(ref networks) = stats.networks {
+            let mut total_rx: u64 = 0;
+            let mut total_tx: u64 = 0;
+            let mut total_rx_packets: u64 = 0;
+            let mut total_tx_packets: u64 = 0;
+
+            for (_net_name, net_stats) in networks {
+                total_rx += net_stats.rx_bytes;
+                total_tx += net_stats.tx_bytes;
+                total_rx_packets += net_stats.rx_packets;
+                total_tx_packets += net_stats.tx_packets;
+            }
+
+            metrics.push(mk("docker.net.rx_bytes", total_rx as f64, MetricCategory::ContainerNetwork));
+            metrics.push(mk("docker.net.tx_bytes", total_tx as f64, MetricCategory::ContainerNetwork));
+            metrics.push(mk("docker.net.rx_packets", total_rx_packets as f64, MetricCategory::ContainerNetwork));
+            metrics.push(mk("docker.net.tx_packets", total_tx_packets as f64, MetricCategory::ContainerNetwork));
+        }
+
+        // Block I/O
+        if let Some(ref io_entries) = stats.blkio_stats.io_service_bytes_recursive {
+            let mut read_bytes: u64 = 0;
+            let mut write_bytes: u64 = 0;
+
+            for entry in io_entries {
+                match entry.op.to_lowercase().as_str() {
+                    "read" => read_bytes += entry.value,
+                    "write" => write_bytes += entry.value,
+                    _ => {}
+                }
+            }
+
+            metrics.push(mk("docker.blkio.read_bytes", read_bytes as f64, MetricCategory::ContainerIo));
+            metrics.push(mk("docker.blkio.write_bytes", write_bytes as f64, MetricCategory::ContainerIo));
+        }
+
+        // PIDs
+        if let Some(current_pids) = stats.pids_stats.current {
+            metrics.push(mk("docker.pids.current", current_pids as f64, MetricCategory::ContainerCpu));
+        }
+
+        metrics
+    }
+}
+
+#[async_trait]
+impl Collector for DockerCollector {
+    fn name(&self) -> &str { "docker" }
+    fn collector_type(&self) -> CollectorType { CollectorType::Docker }
+
+    async fn init(&mut self) -> CollectorResult<()> {
+        // Verify Docker socket is accessible
+        let socket_path = &self.config.socket_path;
+        if !Path::new(socket_path).exists() {
+            warn!(target: "cerebro::collector::docker",
+                path = socket_path, "Docker socket not found, collector will retry");
+        } else {
+            info!(target: "cerebro::collector::docker",
+                path = socket_path, "Docker socket found");
+        }
+        Ok(())
+    }
+
+    async fn start(&mut self, tx: MetricSender) -> CollectorResult<()> {
+        self.base.set_sender(tx.clone());
+        self.base.set_running(true);
+
+        let interval_dur = self.base.interval;
+        let shutdown = self.base.shutdown_signal();
+        let socket_path = self.config.socket_path.clone();
+        let hostname = self.hostname.clone();
+        let include_patterns: Vec<Regex> = self.config.include_patterns.iter()
+            .filter_map(|p| Regex::new(p).ok())
+            .collect();
+        let exclude_patterns: Vec<Regex> = self.config.exclude_patterns.iter()
+            .filter_map(|p| Regex::new(p).ok())
+            .collect();
+
+        let handle = tokio::spawn(async move {
+            let docker = DockerClient::new(&socket_path);
+            let mut tick = interval(interval_dur);
+
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        let start = Instant::now();
+
+                        // List containers
+                        let containers = match docker.list_containers().await {
+                            Ok(c) => c,
+                            Err(e) => {
+                                warn!(target: "cerebro::collector::docker", error = %e, "Failed to list containers");
+                                continue;
+                            }
+                        };
+
+                        // Emit container count
+                        let count_metric = Metric::new(
+                            CompactString::from("docker.containers.running"),
+                            MetricValue::Gauge(containers.len() as f64),
+                        )
+                        .with_source(MetricSource::Docker {
+                            container_id: CompactString::from(""),
+                            container_name: CompactString::from(""),
+                            stat_type: DockerStatType::Cpu,
+                        })
+                        .with_category(MetricCategory::ContainerCpu)
+                        .with_label("host", hostname.as_str());
+                        let _ = tx.send(count_metric);
+
+                        let mut total_metrics = 0u64;
+
+                        for container in &containers {
+                            let name = container.clean_name();
+
+                            // Apply include/exclude filters
+                            if !include_patterns.is_empty() {
+                                let matches = include_patterns.iter().any(|re| re.is_match(name));
+                                if !matches { continue; }
+                            }
+                            if exclude_patterns.iter().any(|re| re.is_match(name)) {
+                                continue;
+                            }
+
+                            // Fetch stats
+                            match docker.container_stats(&container.id).await {
+                                Ok(stats) => {
+                                    let metrics = DockerCollector::stats_to_metrics(
+                                        &stats, name, container.short_id(), &container.image, &hostname,
+                                    );
+                                    total_metrics += metrics.len() as u64;
+                                    for m in metrics {
+                                        let _ = tx.send(m);
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(target: "cerebro::collector::docker",
+                                        container = name, error = %e, "Failed to get container stats");
+                                }
+                            }
+                        }
+
+                        trace!(target: "cerebro::collector::docker",
+                            containers = containers.len(),
+                            metrics = total_metrics,
+                            duration_us = start.elapsed().as_micros() as u64,
+                            "Docker collection cycle complete"
+                        );
+                    }
+                    _ = shutdown.notified() => {
+                        info!(target: "cerebro::collector::docker", "Docker collector shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        *self.task_handle.lock().await = Some(handle);
+        info!(target: "cerebro::collector::docker",
+            socket = %self.config.socket_path, interval_ms = interval_dur.as_millis() as u64,
+            "Docker collector started");
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> CollectorResult<()> {
+        self.base.signal_shutdown();
+        self.base.set_running(false);
+        if let Some(handle) = self.task_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+        info!(target: "cerebro::collector::docker", "Docker collector stopped");
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool { self.base.is_running() }
+    fn health(&self) -> CollectorHealth { self.base.health() }
+    fn stats(&self) -> CollectorStats { self.base.stats() }
+
+    fn get_sender(&self) -> CollectorResult<MetricSender> {
+        self.base.get_sender().cloned().ok_or_else(|| CollectorError::CollectionFailed {
+            source: "docker".to_string(),
+            message: "collector not running".to_string(),
+        })
+    }
+
+    fn interval(&self) -> Duration { self.base.interval }
+    fn set_interval(&mut self, interval: Duration) { self.base.interval = interval; }
+}
+
+
+// ============================================================================
+// SECTION 31: HTTP ENDPOINT COLLECTOR
+// ============================================================================
+// Probes HTTP endpoints for availability, response time, and status.
+// Supports parallel probing with configurable timeouts per endpoint.
+// Useful for health check monitoring of web services and APIs.
+// ============================================================================
+
+/// HTTP endpoint collector.
+///
+/// Performs parallel HTTP probes against configured endpoints and emits
+/// response time, status code, and availability metrics.
+pub struct HttpEndpointCollector {
+    /// Base collector
+    base: BaseCollector,
+    /// Configuration
+    config: HttpCollectorConfig,
+    /// HTTP client
+    client: HttpClient,
+    /// Task handle
+    task_handle: TokioMutex<Option<TokioJoinHandle<()>>>,
+    /// Hostname
+    hostname: CompactString,
+}
+
+impl HttpEndpointCollector {
+    /// Create a new HTTP endpoint collector.
+    pub fn new(config: HttpCollectorConfig) -> Self {
+        let client = HttpClient::builder()
+            .timeout(Duration::from_secs(config.default_timeout_secs))
+            .pool_max_idle_per_host(4)
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .unwrap_or_default();
+
+        let hostname = fs::read_to_string("/etc/hostname")
+            .map(|s| CompactString::from(s.trim()))
+            .unwrap_or_else(|_| CompactString::from("unknown"));
+
+        Self {
+            base: BaseCollector::new("http", CollectorType::Http)
+                .with_interval(Duration::from_secs(30)),
+            config,
+            client,
+            task_handle: TokioMutex::new(None),
+            hostname,
+        }
+    }
+
+    /// Probe a single HTTP endpoint and return metrics.
+    async fn probe_endpoint(
+        client: &HttpClient,
+        endpoint: &HttpEndpointConfig,
+        hostname: &str,
+    ) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(4);
+        let endpoint_name = endpoint.name.as_deref().unwrap_or(&endpoint.url);
+        let labels: [(&str, &str); 3] = [
+            ("host", hostname),
+            ("url", &endpoint.url),
+            ("name", endpoint_name),
+        ];
+
+        let mk = |name: &str, val: f64, cat: MetricCategory| -> Metric {
+            let mut m = Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                .with_source(MetricSource::Http {
+                    endpoint: CompactString::from(&endpoint.url),
+                    method: HttpMethod::Get,
+                })
+                .with_category(cat);
+            for (k, v) in &labels { m = m.with_label(k, v); }
+            m.with_priority(Priority::Normal)
+        };
+
+        let start = Instant::now();
+
+        let request = match endpoint.method.to_uppercase().as_str() {
+            "POST" => client.post(&endpoint.url),
+            "HEAD" => client.head(&endpoint.url),
+            "PUT" => client.put(&endpoint.url),
+            _ => client.get(&endpoint.url),
+        };
+
+        // Add custom headers
+        let mut request = request;
+        for (key, value) in &endpoint.headers {
+            request = request.header(key.as_str(), value.as_str());
+        }
+
+        // Apply endpoint-specific timeout
+        let request = if let Some(timeout_s) = endpoint.timeout_secs {
+            request.timeout(Duration::from_secs(timeout_s))
+        } else {
+            request
+        };
+
+        match request.send().await {
+            Ok(response) => {
+                let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+                let status = response.status().as_u16();
+                let content_length = response.content_length().unwrap_or(0);
+
+                // Check if status is expected
+                let is_up = if endpoint.expected_status.is_empty() {
+                    response.status().is_success()
+                } else {
+                    endpoint.expected_status.contains(&status)
+                };
+
+                metrics.push(mk("http.response_time_ms", elapsed_ms, MetricCategory::HttpResponseTime));
+                metrics.push(mk("http.status_code", status as f64, MetricCategory::HttpStatus));
+                metrics.push(mk("http.up", if is_up { 1.0 } else { 0.0 }, MetricCategory::Availability));
+                metrics.push(mk("http.content_length_bytes", content_length as f64, MetricCategory::HttpResponseTime));
+            }
+            Err(e) => {
+                let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+                metrics.push(mk("http.response_time_ms", elapsed_ms, MetricCategory::HttpResponseTime));
+                metrics.push(mk("http.up", 0.0, MetricCategory::Availability));
+                metrics.push(mk("http.error", 1.0, MetricCategory::HttpErrors));
+
+                let is_timeout = e.is_timeout();
+                metrics.push(Metric::new(
+                    CompactString::from("http.timeout"),
+                    MetricValue::Gauge(if is_timeout { 1.0 } else { 0.0 }),
+                )
+                .with_source(MetricSource::Http {
+                    endpoint: CompactString::from(&endpoint.url),
+                    method: HttpMethod::Get,
+                })
+                .with_category(MetricCategory::HttpResponseTime)
+                .with_label("host", hostname).with_label("url", &endpoint.url));
+            }
+        }
+
+        metrics
+    }
+}
+
+#[async_trait]
+impl Collector for HttpEndpointCollector {
+    fn name(&self) -> &str { "http" }
+    fn collector_type(&self) -> CollectorType { CollectorType::Http }
+
+    async fn init(&mut self) -> CollectorResult<()> {
+        info!(target: "cerebro::collector::http",
+            endpoints = self.config.endpoints.len(),
+            "HTTP endpoint collector initialized");
+        Ok(())
+    }
+
+    async fn start(&mut self, tx: MetricSender) -> CollectorResult<()> {
+        self.base.set_sender(tx.clone());
+        self.base.set_running(true);
+
+        let interval_dur = self.base.interval;
+        let shutdown = self.base.shutdown_signal();
+        let client = self.client.clone();
+        let endpoints = self.config.endpoints.clone();
+        let hostname = self.hostname.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut tick = interval(interval_dur);
+
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        let start = Instant::now();
+
+                        // Probe all endpoints in parallel using JoinSet
+                        let mut join_set = JoinSet::new();
+
+                        for endpoint in &endpoints {
+                            let client = client.clone();
+                            let ep = endpoint.clone();
+                            let hn = hostname.clone();
+
+                            join_set.spawn(async move {
+                                HttpEndpointCollector::probe_endpoint(&client, &ep, &hn).await
+                            });
+                        }
+
+                        let mut total_metrics = 0u64;
+                        while let Some(result) = join_set.join_next().await {
+                            if let Ok(metrics) = result {
+                                total_metrics += metrics.len() as u64;
+                                for m in metrics {
+                                    let _ = tx.send(m);
+                                }
+                            }
+                        }
+
+                        trace!(target: "cerebro::collector::http",
+                            endpoints = endpoints.len(),
+                            metrics = total_metrics,
+                            duration_us = start.elapsed().as_micros() as u64,
+                            "HTTP probe cycle complete"
+                        );
+                    }
+                    _ = shutdown.notified() => {
+                        info!(target: "cerebro::collector::http", "HTTP collector shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        *self.task_handle.lock().await = Some(handle);
+        info!(target: "cerebro::collector::http",
+            endpoints = self.config.endpoints.len(), interval_ms = interval_dur.as_millis() as u64,
+            "HTTP endpoint collector started");
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> CollectorResult<()> {
+        self.base.signal_shutdown();
+        self.base.set_running(false);
+        if let Some(handle) = self.task_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+        info!(target: "cerebro::collector::http", "HTTP collector stopped");
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool { self.base.is_running() }
+    fn health(&self) -> CollectorHealth { self.base.health() }
+    fn stats(&self) -> CollectorStats { self.base.stats() }
+
+    fn get_sender(&self) -> CollectorResult<MetricSender> {
+        self.base.get_sender().cloned().ok_or_else(|| CollectorError::CollectionFailed {
+            source: "http".to_string(),
+            message: "collector not running".to_string(),
+        })
+    }
+
+    fn interval(&self) -> Duration { self.base.interval }
+    fn set_interval(&mut self, interval: Duration) { self.base.interval = interval; }
+}
+
+
+// ============================================================================
+// SECTION 32: LOG COLLECTOR
+// ============================================================================
+// Tails log files and extracts metrics from them:
+// - Line rate counting
+// - Error/warning detection via pattern matching
+// - JSON structured log parsing for numeric fields
+// - File rotation detection via inode tracking
+// - Offset bookmarking for resume after restart
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 32.1 Log File State
+// ----------------------------------------------------------------------------
+
+/// Tracked state for a single log file.
+struct LogFileState {
+    /// File path
+    path: String,
+    /// Current read offset in bytes
+    offset: u64,
+    /// Inode number (for rotation detection)
+    inode: u64,
+    /// Lines read since last emission
+    lines_since_last: u64,
+    /// Errors matched since last emission
+    errors_since_last: u64,
+    /// Warnings matched since last emission
+    warnings_since_last: u64,
+    /// Bytes read since last emission
+    bytes_since_last: u64,
+    /// Compiled regex patterns for error detection
+    error_patterns: Vec<Regex>,
+    /// Compiled regex patterns for warning detection
+    warning_patterns: Vec<Regex>,
+    /// Custom labels for this file's metrics
+    labels: HashMap<String, String>,
+}
+
+impl LogFileState {
+    /// Create a new log file state.
+    fn new(config: &LogFileConfig) -> Self {
+        // Default error/warning patterns
+        let error_patterns = vec![
+            Regex::new(r"(?i)\b(error|err|fatal|panic|exception|fail(ed|ure)?)\b").unwrap(),
+            Regex::new(r"(?i)\b(crit(ical)?|emerg(ency)?|alert)\b").unwrap(),
+        ];
+        let warning_patterns = vec![
+            Regex::new(r"(?i)\b(warn(ing)?|deprecated|timeout|retry)\b").unwrap(),
+        ];
+
+        // Get initial inode
+        let inode = fs::metadata(&config.path)
+            .map(|m| {
+                #[cfg(unix)]
+                { std::os::unix::fs::MetadataExt::ino(&m) }
+                #[cfg(not(unix))]
+                { 0 }
+            })
+            .unwrap_or(0);
+
+        Self {
+            path: config.path.clone(),
+            offset: 0,
+            inode,
+            lines_since_last: 0,
+            errors_since_last: 0,
+            warnings_since_last: 0,
+            bytes_since_last: 0,
+            error_patterns,
+            warning_patterns,
+            labels: config.labels.clone(),
+        }
+    }
+
+    /// Check if the file has been rotated (inode changed).
+    fn check_rotation(&mut self) -> bool {
+        let current_inode = fs::metadata(&self.path)
+            .map(|m| {
+                #[cfg(unix)]
+                { std::os::unix::fs::MetadataExt::ino(&m) }
+                #[cfg(not(unix))]
+                { 0 }
+            })
+            .unwrap_or(0);
+
+        if current_inode != self.inode && current_inode != 0 {
+            // File was rotated — reset offset and update inode
+            self.inode = current_inode;
+            self.offset = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Read new lines from the file since last offset.
+    fn read_new_lines(&mut self) -> Vec<String> {
+        let file = match File::open(&self.path) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+
+        let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+
+        // If file is smaller than our offset, it was truncated
+        if file_len < self.offset {
+            self.offset = 0;
+        }
+
+        // Seek to offset
+        let mut reader = BufReader::new(file);
+        if self.offset > 0 {
+            use std::io::Seek;
+            if reader.seek(std::io::SeekFrom::Start(self.offset)).is_err() {
+                return Vec::new();
+            }
+        }
+
+        let mut lines = Vec::new();
+        let mut bytes_read = 0u64;
+
+        // Read up to 10000 lines per cycle to avoid blocking
+        for _ in 0..10000 {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    bytes_read += n as u64;
+                    let trimmed = line.trim_end().to_string();
+                    if !trimmed.is_empty() {
+                        lines.push(trimmed);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        self.offset += bytes_read;
+        self.bytes_since_last += bytes_read;
+
+        lines
+    }
+
+    /// Process a line, updating counters.
+    fn process_line(&mut self, line: &str) {
+        self.lines_since_last += 1;
+
+        // Check for errors
+        if self.error_patterns.iter().any(|re| re.is_match(line)) {
+            self.errors_since_last += 1;
+        }
+        // Check for warnings
+        else if self.warning_patterns.iter().any(|re| re.is_match(line)) {
+            self.warnings_since_last += 1;
+        }
+    }
+
+    /// Drain counters and produce metrics.
+    fn drain_metrics(&mut self, hostname: &str) -> Vec<Metric> {
+        let mut metrics = Vec::with_capacity(6);
+
+        let file_label = self.path.clone();
+        let mk = |name: &str, val: f64, cat: MetricCategory| -> Metric {
+            Metric::new(CompactString::from(name), MetricValue::Gauge(val))
+                .with_source(MetricSource::Log {
+                    file_path: CompactString::from(&file_label),
+                    log_type: LogType::Application,
+                })
+                .with_category(cat)
+                .with_label("host", hostname)
+                .with_label("file", &file_label)
+                .with_priority(Priority::Normal)
+        };
+
+        metrics.push(mk("log.lines", self.lines_since_last as f64, MetricCategory::Custom));
+        metrics.push(mk("log.errors", self.errors_since_last as f64, MetricCategory::ErrorRate));
+        metrics.push(mk("log.warnings", self.warnings_since_last as f64, MetricCategory::ErrorRate));
+        metrics.push(mk("log.bytes_read", self.bytes_since_last as f64, MetricCategory::Custom));
+
+        // Add custom labels from config
+        for metric in &mut metrics {
+            for (k, v) in &self.labels {
+                *metric = metric.clone().with_label(k, v);
+            }
+        }
+
+        // Reset counters
+        self.lines_since_last = 0;
+        self.errors_since_last = 0;
+        self.warnings_since_last = 0;
+        self.bytes_since_last = 0;
+
+        metrics
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 32.2 Log Collector Implementation
+// ----------------------------------------------------------------------------
+
+/// Log file tailing collector.
+///
+/// Watches configured log files, detects new lines, counts errors/warnings
+/// using pattern matching, and emits log-derived metrics.
+pub struct LogCollector {
+    /// Base collector
+    base: BaseCollector,
+    /// Configuration
+    config: LogCollectorConfig,
+    /// Task handle
+    task_handle: TokioMutex<Option<TokioJoinHandle<()>>>,
+    /// Hostname
+    hostname: CompactString,
+}
+
+impl LogCollector {
+    /// Create a new log collector.
+    pub fn new(config: LogCollectorConfig) -> Self {
+        let hostname = fs::read_to_string("/etc/hostname")
+            .map(|s| CompactString::from(s.trim()))
+            .unwrap_or_else(|_| CompactString::from("unknown"));
+
+        Self {
+            base: BaseCollector::new("log", CollectorType::Log)
+                .with_interval(Duration::from_secs(5)),
+            config,
+            task_handle: TokioMutex::new(None),
+            hostname,
+        }
+    }
+
+    /// Expand glob patterns to actual file paths.
+    fn expand_paths(configs: &[LogFileConfig]) -> Vec<LogFileConfig> {
+        let mut expanded = Vec::new();
+
+        for config in configs {
+            // Try glob expansion
+            if config.path.contains('*') || config.path.contains('?') {
+                if let Ok(paths) = glob::glob(&config.path) {
+                    for path in paths.flatten() {
+                        let mut c = config.clone();
+                        c.path = path.to_string_lossy().to_string();
+                        expanded.push(c);
+                    }
+                }
+            } else {
+                expanded.push(config.clone());
+            }
+        }
+
+        expanded
+    }
+}
+
+#[async_trait]
+impl Collector for LogCollector {
+    fn name(&self) -> &str { "log" }
+    fn collector_type(&self) -> CollectorType { CollectorType::Log }
+
+    async fn init(&mut self) -> CollectorResult<()> {
+        let file_count = self.config.files.len();
+        info!(target: "cerebro::collector::log",
+            files = file_count, "Log collector initialized");
+        Ok(())
+    }
+
+    async fn start(&mut self, tx: MetricSender) -> CollectorResult<()> {
+        self.base.set_sender(tx.clone());
+        self.base.set_running(true);
+
+        let interval_dur = self.base.interval;
+        let shutdown = self.base.shutdown_signal();
+        let file_configs = Self::expand_paths(&self.config.files);
+        let hostname = self.hostname.clone();
+
+        let handle = tokio::spawn(async move {
+            // Initialize file states, seeking to end so we only see new lines
+            let mut states: Vec<LogFileState> = file_configs.iter()
+                .map(|cfg| {
+                    let mut state = LogFileState::new(cfg);
+                    // Seek to end of file on start
+                    if let Ok(meta) = fs::metadata(&cfg.path) {
+                        state.offset = meta.len();
+                    }
+                    state
+                })
+                .collect();
+
+            let mut tick = interval(interval_dur);
+
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        let start = Instant::now();
+                        let mut total_metrics = 0u64;
+
+                        // Emit total files being watched
+                        let _ = tx.send(Metric::new(
+                            CompactString::from("log.files_watched"),
+                            MetricValue::Gauge(states.len() as f64),
+                        )
+                        .with_source(MetricSource::Log {
+                            file_path: CompactString::from(""),
+                            log_type: LogType::Application,
+                        })
+                        .with_category(MetricCategory::Custom)
+                        .with_label("host", hostname.as_str()));
+
+                        for state in &mut states {
+                            // Check for file rotation
+                            state.check_rotation();
+
+                            // Read new lines
+                            let new_lines = state.read_new_lines();
+
+                            // Process each line
+                            for line in &new_lines {
+                                state.process_line(line);
+                            }
+
+                            // Emit metrics for this file
+                            if state.lines_since_last > 0 || state.bytes_since_last > 0 {
+                                let metrics = state.drain_metrics(&hostname);
+                                total_metrics += metrics.len() as u64;
+                                for m in metrics {
+                                    let _ = tx.send(m);
+                                }
+                            }
+                        }
+
+                        if total_metrics > 0 {
+                            trace!(target: "cerebro::collector::log",
+                                files = states.len(),
+                                metrics = total_metrics,
+                                duration_us = start.elapsed().as_micros() as u64,
+                                "Log collection cycle complete"
+                            );
+                        }
+                    }
+                    _ = shutdown.notified() => {
+                        info!(target: "cerebro::collector::log", "Log collector shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        *self.task_handle.lock().await = Some(handle);
+        info!(target: "cerebro::collector::log",
+            files = file_configs.len(), interval_ms = interval_dur.as_millis() as u64,
+            "Log collector started");
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> CollectorResult<()> {
+        self.base.signal_shutdown();
+        self.base.set_running(false);
+        if let Some(handle) = self.task_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+        info!(target: "cerebro::collector::log", "Log collector stopped");
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool { self.base.is_running() }
+    fn health(&self) -> CollectorHealth { self.base.health() }
+    fn stats(&self) -> CollectorStats { self.base.stats() }
+
+    fn get_sender(&self) -> CollectorResult<MetricSender> {
+        self.base.get_sender().cloned().ok_or_else(|| CollectorError::CollectionFailed {
+            source: "log".to_string(),
+            message: "collector not running".to_string(),
+        })
+    }
+
+    fn interval(&self) -> Duration { self.base.interval }
+    fn set_interval(&mut self, interval: Duration) { self.base.interval = interval; }
+}
+
+
+// ============================================================================
+// SECTION 33: PHASE 5 TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod phase5_tests {
+    use super::*;
+
+    #[test]
+    fn test_cpu_snapshot_parsing() {
+        let line = "cpu  12345 678 9012 34567 890 12 34 56";
+        let snap = CpuSnapshot::parse(line).unwrap();
+        assert_eq!(snap.core_id.as_str(), "cpu");
+        assert_eq!(snap.user, 12345);
+        assert_eq!(snap.nice, 678);
+        assert_eq!(snap.system, 9012);
+        assert_eq!(snap.idle, 34567);
+        assert_eq!(snap.iowait, 890);
+        assert_eq!(snap.irq, 12);
+        assert_eq!(snap.softirq, 34);
+        assert_eq!(snap.steal, 56);
+        assert_eq!(snap.total(), 12345 + 678 + 9012 + 34567 + 890 + 12 + 34 + 56);
+    }
+
+    #[test]
+    fn test_cpu_snapshot_per_core() {
+        let line = "cpu3 1000 200 300 4000 50 6 7 8";
+        let snap = CpuSnapshot::parse(line).unwrap();
+        assert_eq!(snap.core_id.as_str(), "cpu3");
+        assert_eq!(snap.user, 1000);
+    }
+
+    #[test]
+    fn test_cpu_snapshot_invalid() {
+        assert!(CpuSnapshot::parse("intr 12345 678").is_none());
+        assert!(CpuSnapshot::parse("").is_none());
+    }
+
+    #[test]
+    fn test_cpu_percentage_computation() {
+        let prev = CpuSnapshot {
+            core_id: CompactString::from("cpu"),
+            user: 1000, nice: 0, system: 500, idle: 8000,
+            iowait: 100, irq: 10, softirq: 5, steal: 0,
+        };
+        let curr = CpuSnapshot {
+            core_id: CompactString::from("cpu"),
+            user: 1500, nice: 0, system: 700, idle: 8500,
+            iowait: 150, irq: 15, softirq: 10, steal: 0,
+        };
+
+        let pcts = curr.compute_percentages(&prev);
+        let total_delta = (1500 + 700 + 8500 + 150 + 15 + 10) - (1000 + 500 + 8000 + 100 + 10 + 5);
+        assert!(pcts.usage > 0.0);
+        assert!(pcts.idle > 0.0);
+        assert!((pcts.user + pcts.system + pcts.idle + pcts.iowait + pcts.irq + pcts.softirq - 100.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_cpu_percentage_zero_delta() {
+        let snap = CpuSnapshot::default();
+        let pcts = snap.compute_percentages(&snap);
+        assert_eq!(pcts.usage, 0.0);
+    }
+
+    #[test]
+    fn test_disk_snapshot_parsing() {
+        let line = "   8       0 sda 12345 678 901234 5678 9012 345 678901 2345 0 6789 12345 0 0 0 0";
+        let snap = DiskSnapshot::parse(line).unwrap();
+        assert_eq!(snap.device.as_str(), "sda");
+        assert_eq!(snap.reads_completed, 12345);
+        assert_eq!(snap.sectors_read, 901234);
+        assert_eq!(snap.writes_completed, 9012);
+        assert_eq!(snap.sectors_written, 678901);
+    }
+
+    #[test]
+    fn test_disk_snapshot_skip_loop() {
+        let line = "   7       0 loop0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0";
+        assert!(DiskSnapshot::parse(line).is_none());
+    }
+
+    #[test]
+    fn test_disk_whole_disk_detection() {
+        let mut snap = DiskSnapshot::default();
+
+        snap.device = CompactString::from("sda");
+        assert!(snap.is_whole_disk());
+
+        snap.device = CompactString::from("sda1");
+        assert!(!snap.is_whole_disk());
+
+        snap.device = CompactString::from("vda");
+        assert!(snap.is_whole_disk());
+
+        snap.device = CompactString::from("vda2");
+        assert!(!snap.is_whole_disk());
+    }
+
+    #[test]
+    fn test_netif_snapshot_parsing() {
+        let line = "  eth0: 12345678 90123 45 67 0 0 0 0 87654321 10987 65 43 0 0 0 0";
+        let snap = NetIfSnapshot::parse(line).unwrap();
+        assert_eq!(snap.interface.as_str(), "eth0");
+        assert_eq!(snap.rx_bytes, 12345678);
+        assert_eq!(snap.rx_packets, 90123);
+        assert_eq!(snap.rx_errors, 45);
+        assert_eq!(snap.rx_drops, 67);
+        assert_eq!(snap.tx_bytes, 87654321);
+        assert_eq!(snap.tx_packets, 10987);
+        assert_eq!(snap.tx_errors, 65);
+        assert_eq!(snap.tx_drops, 43);
+    }
+
+    #[test]
+    fn test_netif_skip_loopback() {
+        let line = "    lo: 12345 678 0 0 0 0 0 0 12345 678 0 0 0 0 0 0";
+        assert!(NetIfSnapshot::parse(line).is_none());
+    }
+
+    #[test]
+    fn test_system_collector_creation() {
+        let config = SystemCollectorConfig::default();
+        let collector = SystemCollector::new(config);
+        assert_eq!(collector.name(), "system");
+        assert_eq!(collector.collector_type(), CollectorType::System);
+        assert!(!collector.is_running());
+    }
+
+    #[test]
+    fn test_netdata_chart_mapper() {
+        assert_eq!(NetdataChartMapper::map_family("system.cpu"), MetricCategory::CpuUsage);
+        assert_eq!(NetdataChartMapper::map_family("mem.available"), MetricCategory::MemoryUsage);
+        assert_eq!(NetdataChartMapper::map_family("disk.io"), MetricCategory::DiskIo);
+        assert_eq!(NetdataChartMapper::map_family("net.eth0"), MetricCategory::NetworkTraffic);
+        assert_eq!(NetdataChartMapper::map_family("mysql.queries"), MetricCategory::DatabaseConnections);
+        assert_eq!(NetdataChartMapper::map_family("some_random"), MetricCategory::Custom);
+    }
+
+    #[test]
+    fn test_docker_container_clean_name() {
+        let container = DockerContainer {
+            id: "abc123def456789012345678".to_string(),
+            names: vec!["/my-container".to_string()],
+            image: "nginx:latest".to_string(),
+            state: "running".to_string(),
+            status: "Up 2 hours".to_string(),
+            labels: HashMap::new(),
+        };
+        assert_eq!(container.clean_name(), "my-container");
+        assert_eq!(container.short_id(), "abc123def456");
+    }
+
+    #[test]
+    fn test_docker_stats_to_metrics() {
+        let stats = DockerStats {
+            cpu_stats: DockerCpuStats {
+                cpu_usage: DockerCpuUsage {
+                    total_usage: 2000000000,
+                    usage_in_usermode: 1500000000,
+                    usage_in_kernelmode: 500000000,
+                },
+                system_cpu_usage: Some(20000000000),
+                online_cpus: Some(4),
+            },
+            precpu_stats: DockerCpuStats {
+                cpu_usage: DockerCpuUsage {
+                    total_usage: 1000000000,
+                    usage_in_usermode: 750000000,
+                    usage_in_kernelmode: 250000000,
+                },
+                system_cpu_usage: Some(10000000000),
+                online_cpus: Some(4),
+            },
+            memory_stats: DockerMemoryStats {
+                usage: 50 * 1024 * 1024,
+                max_usage: 100 * 1024 * 1024,
+                limit: 256 * 1024 * 1024,
+                stats: Some(DockerMemoryDetailStats {
+                    cache: 10 * 1024 * 1024,
+                    rss: 40 * 1024 * 1024,
+                    mapped_file: 5 * 1024 * 1024,
+                    pgfault: 1000,
+                    pgmajfault: 5,
+                }),
+            },
+            networks: Some({
+                let mut m = HashMap::new();
+                m.insert("eth0".to_string(), DockerNetworkStats {
+                    rx_bytes: 1000000, rx_packets: 5000, rx_errors: 0, rx_dropped: 0,
+                    tx_bytes: 500000, tx_packets: 3000, tx_errors: 0, tx_dropped: 0,
+                });
+                m
+            }),
+            blkio_stats: DockerBlkioStats {
+                io_service_bytes_recursive: Some(vec![
+                    DockerBlkioEntry { op: "Read".to_string(), value: 1024000 },
+                    DockerBlkioEntry { op: "Write".to_string(), value: 512000 },
+                ]),
+            },
+            pids_stats: DockerPidsStats {
+                current: Some(15),
+                limit: Some(4096),
+            },
+        };
+
+        let metrics = DockerCollector::stats_to_metrics(&stats, "test-container", "abc123def456", "nginx:latest", "test-host");
+
+        // Should have CPU + Memory + Network + BlockIO + PIDs metrics
+        assert!(metrics.len() >= 15);
+
+        // Verify CPU usage is calculated correctly
+        // cpu_delta = 1000000000, system_delta = 10000000000, cpus = 4
+        // cpu_percent = (1000000000 / 10000000000) * 4 * 100 = 40.0
+        let cpu_metric = metrics.iter().find(|m| m.name == "docker.cpu.usage_percent").unwrap();
+        if let MetricValue::Gauge(v) = cpu_metric.value {
+            assert!((v - 40.0).abs() < 0.1);
+        } else {
+            panic!("Expected Gauge");
+        }
+
+        // Verify memory percentage
+        let mem_pct = metrics.iter().find(|m| m.name == "docker.memory.usage_percent").unwrap();
+        if let MetricValue::Gauge(v) = mem_pct.value {
+            let expected = (50.0 * 1024.0 * 1024.0) / (256.0 * 1024.0 * 1024.0) * 100.0;
+            assert!((v - expected).abs() < 0.1);
+        }
+    }
+
+    #[test]
+    fn test_http_collector_creation() {
+        let config = HttpCollectorConfig {
+            enabled: true,
+            endpoints: vec![
+                HttpEndpointConfig {
+                    url: "https://example.com".to_string(),
+                    method: "GET".to_string(),
+                    expected_status: vec![200],
+                    timeout_secs: Some(5),
+                    headers: HashMap::new(),
+                    interval_ms: None,
+                    name: Some("example".to_string()),
+                },
+            ],
+            default_timeout_secs: 10,
+        };
+        let collector = HttpEndpointCollector::new(config);
+        assert_eq!(collector.name(), "http");
+        assert!(!collector.is_running());
+    }
+
+    #[test]
+    fn test_log_collector_creation() {
+        let config = LogCollectorConfig {
+            enabled: true,
+            files: Vec::new(),
+            buffer_lines: 10000,
+        };
+        let collector = LogCollector::new(config);
+        assert_eq!(collector.name(), "log");
+        assert_eq!(collector.collector_type(), CollectorType::Log);
+    }
+
+    #[test]
+    fn test_log_file_state_error_detection() {
+        let config = LogFileConfig {
+            path: "/tmp/test.log".to_string(),
+            format: String::new(),
+            pattern: None,
+            labels: HashMap::new(),
+        };
+        let mut state = LogFileState::new(&config);
+
+        state.process_line("2026-02-11 INFO All good");
+        assert_eq!(state.lines_since_last, 1);
+        assert_eq!(state.errors_since_last, 0);
+
+        state.process_line("2026-02-11 ERROR Something failed");
+        assert_eq!(state.lines_since_last, 2);
+        assert_eq!(state.errors_since_last, 1);
+
+        state.process_line("2026-02-11 WARN Disk space low");
+        assert_eq!(state.lines_since_last, 3);
+        assert_eq!(state.warnings_since_last, 1);
+
+        state.process_line("2026-02-11 FATAL Out of memory panic");
+        assert_eq!(state.errors_since_last, 2);
+
+        state.process_line("2026-02-11 CRITICAL database connection failure");
+        assert_eq!(state.errors_since_last, 3);
+
+        let metrics = state.drain_metrics("test-host");
+        assert!(metrics.len() >= 4);
+        assert_eq!(state.lines_since_last, 0);
+        assert_eq!(state.errors_since_last, 0);
+    }
+
+    #[test]
+    fn test_collector_types() {
+        let sys = SystemCollector::new(SystemCollectorConfig::default());
+        assert_eq!(sys.collector_type(), CollectorType::System);
+
+        let nd = NetdataCollector::new(NetdataCollectorConfig::default());
+        assert_eq!(nd.collector_type(), CollectorType::Netdata);
+
+        let dc = DockerCollector::new(DockerCollectorConfig::default());
+        assert_eq!(dc.collector_type(), CollectorType::Docker);
+
+        let hc = HttpEndpointCollector::new(HttpCollectorConfig::default());
+        assert_eq!(hc.collector_type(), CollectorType::Http);
+
+        let lc = LogCollector::new(LogCollectorConfig::default());
+        assert_eq!(lc.collector_type(), CollectorType::Log);
+    }
+
+    #[test]
+    fn test_mount_point_reading() {
+        // This tests the helper function — won't have /proc on macOS but shouldn't panic
+        let mounts = SystemCollector::read_mount_points();
+        // On Linux, should find at least "/" mount. On macOS, returns default.
+        assert!(!mounts.is_empty() || cfg!(not(target_os = "linux")));
+    }
+
+    #[tokio::test]
+    async fn test_system_collector_init() {
+        let mut collector = SystemCollector::new(SystemCollectorConfig::default());
+        // Init should always succeed (primes snapshots)
+        let result = collector.init().await;
+        assert!(result.is_ok());
+    }
+}

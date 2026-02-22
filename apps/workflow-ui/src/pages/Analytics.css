@@ -449,6 +449,327 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 3 — EXPORT DROPDOWN
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.export-dropdown {
+    position: relative;
+}
+
+.btn-export {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    border-radius: 8px;
+    color: #4ade80;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-export:hover {
+    background: rgba(34, 197, 94, 0.25);
+    transform: translateY(-1px);
+}
+
+.export-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: #1e293b;
+    border: 1px solid rgba(71, 85, 105, 0.5);
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 50;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.export-menu button {
+    display: block;
+    width: 100%;
+    padding: 10px 20px;
+    background: none;
+    border: none;
+    color: #94a3b8;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.export-menu button:hover {
+    background: rgba(139, 92, 246, 0.15);
+    color: #f8fafc;
+}
+
+.export-menu button+button {
+    border-top: 1px solid rgba(71, 85, 105, 0.3);
+}
+
+/* Chart Hint */
+.chart-hint {
+    margin: 8px 0 0 0;
+    font-size: 0.7rem;
+    color: #475569;
+    text-align: center;
+}
+
+/* Full-width chart card */
+.chart-card.full-width {
+    margin-top: 20px;
+}
+
+/* Clickable charts */
+.bar-chart.clickable,
+.donut-chart.clickable {
+    cursor: pointer;
+}
+
+.bar-chart.clickable:hover .bar,
+.donut-chart.clickable:hover path {
+    filter: brightness(1.15);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 3 — DRILL-DOWN MODAL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: #1e293b;
+    border: 1px solid rgba(71, 85, 105, 0.5);
+    border-radius: 16px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.3);
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    color: #f8fafc;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.modal-close:hover {
+    color: #f8fafc;
+    background: rgba(71, 85, 105, 0.3);
+}
+
+.drill-down-body {
+    padding: 24px;
+    overflow-y: auto;
+}
+
+.drill-down-total {
+    font-size: 0.9rem;
+    color: #94a3b8;
+    margin-bottom: 16px;
+}
+
+.drill-down-total strong {
+    color: #f8fafc;
+}
+
+.drill-down-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.drill-down-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 60px 50px;
+    align-items: center;
+    gap: 12px;
+}
+
+.drill-label {
+    font-size: 0.85rem;
+    color: #e2e8f0;
+    text-transform: capitalize;
+    font-weight: 500;
+}
+
+.drill-bar-bg {
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(71, 85, 105, 0.3);
+    overflow: hidden;
+}
+
+.drill-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.drill-value {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f8fafc;
+    text-align: right;
+}
+
+.drill-pct {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-align: right;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 3 — HEATMAP
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.heatmap-container {
+    padding: 0;
+}
+
+.heatmap-container h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f1f5f9;
+    margin: 0 0 4px 0;
+}
+
+.heatmap-subtitle {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin: 0 0 16px 0;
+}
+
+.heatmap-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.heatmap-hour-labels {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 2px;
+}
+
+.heatmap-corner {
+    width: 40px;
+    flex-shrink: 0;
+}
+
+.heatmap-hour-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.6rem;
+    color: #64748b;
+    text-align: center;
+}
+
+.heatmap-row {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+}
+
+.heatmap-day-label {
+    width: 40px;
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    text-align: right;
+    padding-right: 8px;
+}
+
+.heatmap-cell {
+    flex: 1;
+    aspect-ratio: 1;
+    min-width: 0;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.heatmap-cell:hover {
+    transform: scale(1.3);
+    z-index: 1;
+    box-shadow: 0 0 6px rgba(139, 92, 246, 0.5);
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: flex-end;
+    margin-top: 10px;
+    font-size: 0.7rem;
+    color: #64748b;
+}
+
+.legend-block {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -496,5 +817,9 @@
 
     .donut-chart {
         flex-direction: column;
+    }
+
+    .drill-down-row {
+        grid-template-columns: 60px 1fr 50px 40px;
     }
 }

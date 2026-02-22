@@ -1,12 +1,17 @@
 /**
- * Remediation API Service - Phase 7D
+ * Remediation API Service — FULLY REAL, ZERO MOCKS
  * 
- * Connects to remediation workflow backend APIs:
- * - List, get, create, update, delete workflows
+ * Connects to REAL remediation workflow backend APIs:
+ * - List, get, create, update, delete workflows via /api/remediation/*
  * - Clone system templates
  * - Execute workflows (sync/async)
  * - Node type definitions for visual builder
- * - Execution history and status
+ * - Execution history and status from real DB
+ * 
+ * RULES:
+ * 1. NO mock data generators. EVER.
+ * 2. If backend fails → throw error, let UI handle it
+ * 3. Every workflow and execution comes from the real database
  */
 
 const API_BASE = 'http://localhost:8001';
@@ -111,222 +116,24 @@ export interface CategorySummary {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * List all remediation workflows
+ * List all remediation workflows from the REAL backend.
+ * No mock fallback — if backend is down, error propagates to UI.
  */
 export async function listWorkflows(options: {
     workflow_type?: WorkflowType;
     category?: WorkflowCategory;
     include_system?: boolean;
 } = {}): Promise<RemediationWorkflow[]> {
-    try {
-        const params = new URLSearchParams();
-        if (options.workflow_type) params.append('workflow_type', options.workflow_type);
-        if (options.category) params.append('category', options.category);
-        if (options.include_system !== undefined) params.append('include_system', String(options.include_system));
+    const params = new URLSearchParams();
+    if (options.workflow_type) params.append('workflow_type', options.workflow_type);
+    if (options.category) params.append('category', options.category);
+    if (options.include_system !== undefined) params.append('include_system', String(options.include_system));
 
-        const response = await fetch(`${API_BASE}/api/remediation/workflows?${params.toString()}`);
-        if (!response.ok) throw new Error(`Failed to fetch workflows: ${response.statusText}`);
+    const response = await fetch(`${API_BASE}/api/remediation/templates?${params.toString()}`);
+    if (!response.ok) throw new Error(`Remediation workflows unavailable: ${response.status} ${response.statusText}`);
 
-        const data = await response.json();
-        return data.workflows;
-    } catch {
-        // Return mock data when backend is unavailable
-        return generateMockWorkflows();
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MOCK DATA GENERATORS (for demo when backend not available)
-// ═══════════════════════════════════════════════════════════════════════════
-
-function generateMockWorkflows(): RemediationWorkflow[] {
-    const now = new Date().toISOString();
-    return [
-        {
-            id: 'wf-memory-1',
-            name: 'Memory Crisis Recovery',
-            description: 'Automatically free memory by killing non-essential processes and clearing caches',
-            workflow_type: 'system',
-            is_active: true,
-            version: 3,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'memory',
-                severity_match: ['P0_CRITICAL', 'P1_HIGH'],
-                auto_trigger_enabled: true,
-                confidence_threshold: 0.85,
-                estimated_duration_seconds: 45,
-                success_rate: 0.94,
-                execution_count: 234,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-        {
-            id: 'wf-disk-1',
-            name: 'Disk Cleanup Automation',
-            description: 'Clean temp files, old logs, and unused Docker images to free disk space',
-            workflow_type: 'system',
-            is_active: true,
-            version: 2,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'disk',
-                severity_match: ['P1_HIGH', 'P2_MEDIUM'],
-                auto_trigger_enabled: true,
-                confidence_threshold: 0.9,
-                estimated_duration_seconds: 120,
-                success_rate: 0.97,
-                execution_count: 189,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-        {
-            id: 'wf-container-1',
-            name: 'Container Restart Handler',
-            description: 'Gracefully restart crashed containers with health checks and rollback',
-            workflow_type: 'system',
-            is_active: true,
-            version: 5,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'container',
-                severity_match: ['P0_CRITICAL', 'P1_HIGH'],
-                auto_trigger_enabled: true,
-                confidence_threshold: 0.8,
-                estimated_duration_seconds: 30,
-                success_rate: 0.91,
-                execution_count: 156,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-        {
-            id: 'wf-cpu-1',
-            name: 'CPU Throttle Response',
-            description: 'Identify and throttle runaway processes consuming excessive CPU',
-            workflow_type: 'system',
-            is_active: true,
-            version: 2,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'cpu',
-                severity_match: ['P1_HIGH', 'P2_MEDIUM'],
-                auto_trigger_enabled: false,
-                confidence_threshold: 0.75,
-                estimated_duration_seconds: 15,
-                success_rate: 0.88,
-                execution_count: 78,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-        {
-            id: 'wf-network-1',
-            name: 'Network Connectivity Restore',
-            description: 'Diagnose and restore network connectivity issues with automatic failover',
-            workflow_type: 'system',
-            is_active: true,
-            version: 3,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'network',
-                severity_match: ['P0_CRITICAL', 'P1_HIGH'],
-                auto_trigger_enabled: true,
-                confidence_threshold: 0.85,
-                estimated_duration_seconds: 60,
-                success_rate: 0.82,
-                execution_count: 45,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-        {
-            id: 'wf-security-1',
-            name: 'Security Incident Response',
-            description: 'Isolate compromised hosts, collect forensics, and notify security team',
-            workflow_type: 'system',
-            is_active: true,
-            version: 4,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'security',
-                severity_match: ['P0_CRITICAL'],
-                auto_trigger_enabled: false,
-                confidence_threshold: 0.95,
-                estimated_duration_seconds: 180,
-                success_rate: 0.96,
-                execution_count: 12,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-        {
-            id: 'wf-db-1',
-            name: 'Database Connection Pool Reset',
-            description: 'Clear stale connections and reset database connection pools',
-            workflow_type: 'user',
-            is_active: true,
-            version: 1,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'database',
-                severity_match: ['P1_HIGH', 'P2_MEDIUM'],
-                auto_trigger_enabled: true,
-                confidence_threshold: 0.85,
-                estimated_duration_seconds: 25,
-                success_rate: 0.93,
-                execution_count: 67,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'user@example.com',
-        },
-        {
-            id: 'wf-k8s-1',
-            name: 'Kubernetes Pod Eviction Handler',
-            description: 'Reschedule evicted pods to healthy nodes with resource optimization',
-            workflow_type: 'system',
-            is_active: true,
-            version: 2,
-            nodes: [],
-            edges: [],
-            metadata: {
-                category: 'kubernetes',
-                severity_match: ['P1_HIGH', 'P2_MEDIUM'],
-                auto_trigger_enabled: true,
-                confidence_threshold: 0.8,
-                estimated_duration_seconds: 90,
-                success_rate: 0.89,
-                execution_count: 34,
-                last_executed: now,
-            },
-            created_at: now,
-            updated_at: now,
-            created_by: 'system',
-        },
-    ];
+    const data = await response.json();
+    return Array.isArray(data.templates) ? data.templates : Array.isArray(data.workflows) ? data.workflows : Array.isArray(data) ? data : [];
 }
 
 /**
@@ -450,59 +257,24 @@ export async function executeWorkflowAsync(workflowId: string, options: {
 }
 
 /**
- * Get execution history
+ * Get REAL execution history from the backend.
+ * No mock fallback — if backend is down, error propagates to UI.
  */
 export async function getExecutionHistory(options: {
     workflow_id?: string;
     status?: ExecutionStatus;
     limit?: number;
 } = {}): Promise<WorkflowExecution[]> {
-    try {
-        const params = new URLSearchParams();
-        if (options.workflow_id) params.append('workflow_id', options.workflow_id);
-        if (options.status) params.append('status', options.status);
-        if (options.limit) params.append('limit', String(options.limit));
+    const params = new URLSearchParams();
+    if (options.workflow_id) params.append('workflow_id', options.workflow_id);
+    if (options.status) params.append('status', options.status);
+    if (options.limit) params.append('limit', String(options.limit));
 
-        const response = await fetch(`${API_BASE}/api/remediation/executions?${params.toString()}`);
-        if (!response.ok) throw new Error(`Failed to fetch executions: ${response.statusText}`);
+    const response = await fetch(`${API_BASE}/api/remediation/executions?${params.toString()}`);
+    if (!response.ok) throw new Error(`Execution history unavailable: ${response.status} ${response.statusText}`);
 
-        const data = await response.json();
-        return data.executions;
-    } catch {
-        // Return mock executions when backend unavailable
-        return generateMockExecutions(options.limit || 10);
-    }
-}
-
-function generateMockExecutions(limit: number): WorkflowExecution[] {
-    const statuses: ExecutionStatus[] = ['completed', 'completed', 'running', 'failed', 'completed'];
-    const workflows = [
-        { id: 'wf-memory-1', name: 'Memory Crisis Recovery' },
-        { id: 'wf-disk-1', name: 'Disk Cleanup Automation' },
-        { id: 'wf-container-1', name: 'Container Restart Handler' },
-    ];
-
-    const executions: WorkflowExecution[] = [];
-    for (let i = 0; i < Math.min(limit, 10); i++) {
-        const workflow = workflows[i % workflows.length];
-        const status = statuses[i % statuses.length];
-        const started = new Date(Date.now() - i * 3600000);
-
-        executions.push({
-            execution_id: `exec-${i}-${Date.now()}`,
-            workflow_id: workflow.id,
-            workflow_name: workflow.name,
-            status,
-            started_at: started.toISOString(),
-            completed_at: status !== 'running' ? new Date(started.getTime() + 45000).toISOString() : null,
-            node_results: {},
-            variables: {},
-            current_node_id: status === 'running' ? 'node-1' : null,
-            error: status === 'failed' ? 'Connection timeout' : null,
-            progress_percent: status === 'completed' ? 100 : status === 'running' ? Math.floor(Math.random() * 80) + 10 : 0,
-        });
-    }
-    return executions;
+    const data = await response.json();
+    return Array.isArray(data.executions) ? data.executions : Array.isArray(data) ? data : [];
 }
 
 /**
@@ -607,7 +379,8 @@ export function calculateWorkflowStats(workflows: RemediationWorkflow[]): {
     };
 
     for (const wf of workflows) {
-        stats.byCategory[wf.metadata.category] = (stats.byCategory[wf.metadata.category] || 0) + 1;
+        const cat = wf.metadata?.category ?? 'uncategorized';
+        stats.byCategory[cat] = (stats.byCategory[cat] || 0) + 1;
     }
 
     return stats;

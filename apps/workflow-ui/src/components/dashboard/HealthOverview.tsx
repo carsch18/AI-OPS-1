@@ -1,5 +1,13 @@
 /**
  * Health Overview - System health status panel
+ * 
+ * PHASE 3: Expanded from 4 static services to 6 real services:
+ * - API (Engine on 8001)
+ * - Brain API (on 8000)  
+ * - Database (from engine health)
+ * - SSH Executor (from getExecutorOverview)
+ * - Docker Executor (from getExecutorOverview)
+ * - WebSocket (from real-time connection state)
  */
 
 import type { ReactNode } from 'react';
@@ -13,6 +21,8 @@ import {
     XCircle,
     Loader2,
     HelpCircle,
+    Bot,
+    Wifi,
 } from '../Icons';
 import './Dashboard.css';
 
@@ -21,6 +31,8 @@ interface SystemHealth {
     ssh: string;
     docker: string;
     api: string;
+    brain?: string;
+    websocket?: string;
 }
 
 interface HealthOverviewProps {
@@ -47,16 +59,25 @@ export default function HealthOverview({ health }: HealthOverviewProps) {
     };
 
     const services: { key: string; label: string; icon: ReactNode; status: string }[] = [
-        { key: 'api', label: 'API Server', icon: <Globe size={20} />, status: health.api },
+        { key: 'api', label: 'Engine API', icon: <Globe size={20} />, status: health.api },
+        { key: 'brain', label: 'Brain API', icon: <Bot size={20} />, status: health.brain ?? 'checking' },
         { key: 'database', label: 'Database', icon: <Database size={20} />, status: health.database },
+        { key: 'ssh', label: 'SSH Executor', icon: <Terminal size={20} />, status: health.ssh },
         { key: 'docker', label: 'Docker', icon: <Container size={20} />, status: health.docker },
-        { key: 'ssh', label: 'SSH', icon: <Terminal size={20} />, status: health.ssh },
+        { key: 'websocket', label: 'WebSocket', icon: <Wifi size={20} />, status: health.websocket ?? 'checking' },
     ];
 
     const healthyCount = services.filter(s => s.status === 'healthy').length;
+    const checkingCount = services.filter(s => s.status === 'checking').length;
+
     const overallHealth = healthyCount === services.length ? 'All Systems Operational' :
-        healthyCount >= services.length / 2 ? 'Partial Degradation' :
-            'System Issues Detected';
+        checkingCount > 0 && healthyCount + checkingCount === services.length ? 'Checking Services...' :
+            healthyCount >= services.length / 2 ? 'Partial Degradation' :
+                'System Issues Detected';
+
+    const overallColor = healthyCount === services.length ? '#10b981' :
+        checkingCount > 0 && healthyCount + checkingCount === services.length ? '#f59e0b' :
+            healthyCount >= services.length / 2 ? '#f59e0b' : '#ef4444';
 
     return (
         <div className="health-overview">
@@ -66,11 +87,8 @@ export default function HealthOverview({ health }: HealthOverviewProps) {
                 <div
                     className="health-indicator"
                     style={{
-                        background: healthyCount === services.length ?
-                            'rgba(16, 185, 129, 0.2)' :
-                            healthyCount >= 2 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                        color: healthyCount === services.length ? '#10b981' :
-                            healthyCount >= 2 ? '#f59e0b' : '#ef4444'
+                        background: `${overallColor}20`,
+                        color: overallColor,
                     }}
                 >
                     {overallHealth}

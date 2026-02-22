@@ -7,6 +7,8 @@
  * - Import/Export configuration
  * - Notification channel testing
  * - Reset to defaults
+ * - Phase 3: System Info panel (live API/Brain/Engine health)
+ * - Phase 3: System Settings panel (instance name, env, log level, retention)
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -27,6 +29,7 @@ import type {
     AutonomousSettings,
     DisplaySettings,
     IntegrationSettings,
+    SystemSettings,
     ThemeMode,
 } from '../services/settingsApi';
 import './Settings.css';
@@ -369,6 +372,185 @@ function IntegrationsPanel({ settings, onChange }: IntegrationsPanelProps) {
     );
 }
 
+interface SystemPanelProps {
+    settings: SystemSettings;
+    onChange: (settings: Partial<SystemSettings>) => void;
+}
+
+function SystemPanel({ settings, onChange }: SystemPanelProps) {
+    return (
+        <CategorySection
+            title="System"
+            icon={getSettingCategoryIcon('system')}
+            description={getSettingCategoryDescription('system')}
+        >
+            <SettingRow label="Instance Name" description="Display name for this platform instance">
+                <input
+                    type="text"
+                    value={settings.instanceName}
+                    onChange={e => onChange({ instanceName: e.target.value })}
+                    placeholder="AIOps Platform"
+                    className="text-input"
+                />
+            </SettingRow>
+
+            <SettingRow label="Environment">
+                <select
+                    value={settings.environment}
+                    onChange={e => onChange({ environment: e.target.value as SystemSettings['environment'] })}
+                    className="select-input"
+                >
+                    <option value="development">Development</option>
+                    <option value="staging">Staging</option>
+                    <option value="production">Production</option>
+                </select>
+            </SettingRow>
+
+            <SettingRow label="Log Level" description="Minimum severity for logged messages">
+                <select
+                    value={settings.logLevel}
+                    onChange={e => onChange({ logLevel: e.target.value as SystemSettings['logLevel'] })}
+                    className="select-input"
+                >
+                    <option value="debug">Debug</option>
+                    <option value="info">Info</option>
+                    <option value="warn">Warning</option>
+                    <option value="error">Error</option>
+                </select>
+            </SettingRow>
+
+            <SettingRow label="Data Retention" description="Days to keep execution and event data">
+                <Slider
+                    value={settings.retentionDays}
+                    min={7}
+                    max={365}
+                    step={7}
+                    onChange={v => onChange({ retentionDays: v })}
+                    label=" days"
+                />
+            </SettingRow>
+
+            <SettingRow label="Max Concurrent Executions" description="Limit parallel workflow executions">
+                <Slider
+                    value={settings.maxExecutions}
+                    min={1}
+                    max={50}
+                    onChange={v => onChange({ maxExecutions: v })}
+                />
+            </SettingRow>
+        </CategorySection>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3: SYSTEM INFO PANEL
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ServiceInfo {
+    name: string;
+    version: string;
+    status: string;
+    uptime: string;
+}
+
+function SystemInfoPanel() {
+    const [services, setServices] = useState<ServiceInfo[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        async function fetchHealth() {
+            const results: ServiceInfo[] = [];
+
+            // Engine API (port 8001)
+            try {
+                const r = await fetch('http://localhost:8001/health');
+                if (r.ok) {
+                    const d = await r.json();
+                    results.push({
+                        name: 'Engine API',
+                        version: d.version || '—',
+                        status: 'healthy',
+                        uptime: d.uptime || '—',
+                    });
+                } else {
+                    results.push({ name: 'Engine API', version: '—', status: 'unhealthy', uptime: '—' });
+                }
+            } catch {
+                results.push({ name: 'Engine API', version: '—', status: 'unreachable', uptime: '—' });
+            }
+
+            // Brain API (port 8000)
+            try {
+                const r = await fetch('http://localhost:8000/health');
+                if (r.ok) {
+                    const d = await r.json();
+                    results.push({
+                        name: 'Brain API',
+                        version: d.version || '—',
+                        status: 'healthy',
+                        uptime: d.uptime || '—',
+                    });
+                } else {
+                    results.push({ name: 'Brain API', version: '—', status: 'unhealthy', uptime: '—' });
+                }
+            } catch {
+                results.push({ name: 'Brain API', version: '—', status: 'unreachable', uptime: '—' });
+            }
+
+            // UI build info
+            results.push({
+                name: 'Workflow UI',
+                version: import.meta.env.VITE_APP_VERSION || 'dev',
+                status: 'running',
+                uptime: '—',
+            });
+
+            setServices(results);
+            setLoading(false);
+        }
+        fetchHealth();
+    }, []);
+
+    const statusColor = (s: string) =>
+        s === 'healthy' || s === 'running' ? '#22c55e' :
+            s === 'unhealthy' ? '#ef4444' : '#94a3b8';
+
+    return (
+        <div className="system-info-panel">
+            <div className="category-header">
+                <span className="category-icon">🖥️</span>
+                <div className="category-info">
+                    <h3>System Information</h3>
+                    <p>Live service health and version info</p>
+                </div>
+            </div>
+            <div className="system-info-grid">
+                {loading ? (
+                    <div className="system-info-loading">Checking services…</div>
+                ) : (
+                    services.map(svc => (
+                        <div key={svc.name} className="system-info-card">
+                            <div className="svc-status-dot" style={{ backgroundColor: statusColor(svc.status) }} />
+                            <div className="svc-details">
+                                <span className="svc-name">{svc.name}</span>
+                                <span className="svc-version">v{svc.version}</span>
+                            </div>
+                            <div className="svc-meta">
+                                <span className="svc-status-label" style={{ color: statusColor(svc.status) }}>
+                                    {svc.status}
+                                </span>
+                                {svc.uptime !== '—' && (
+                                    <span className="svc-uptime">Uptime: {svc.uptime}</span>
+                                )}
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -412,6 +594,11 @@ export default function SettingsPage() {
 
     const updateIntegrations = useCallback((partial: Partial<IntegrationSettings>) => {
         setSettings(s => ({ ...s, integrations: { ...s.integrations, ...partial } }));
+        setHasChanges(true);
+    }, []);
+
+    const updateSystem = useCallback((partial: Partial<SystemSettings>) => {
+        setSettings(s => ({ ...s, system: { ...s.system, ...partial } }));
         setHasChanges(true);
     }, []);
 
@@ -532,6 +719,9 @@ export default function SettingsPage() {
                 </div>
             )}
 
+            {/* Phase 3: System Info */}
+            <SystemInfoPanel />
+
             {/* Settings Panels */}
             <div className="settings-content">
                 <NotificationsPanel
@@ -553,6 +743,11 @@ export default function SettingsPage() {
                 <IntegrationsPanel
                     settings={settings.integrations}
                     onChange={updateIntegrations}
+                />
+
+                <SystemPanel
+                    settings={settings.system}
+                    onChange={updateSystem}
                 />
             </div>
         </div>

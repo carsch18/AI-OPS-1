@@ -415,6 +415,99 @@
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 3 — SYSTEM INFO PANEL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.system-info-panel {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    margin-bottom: 24px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+    overflow: hidden;
+}
+
+.system-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+    padding: 0 24px 24px;
+}
+
+.system-info-loading {
+    padding: 16px;
+    color: #94a3b8;
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.system-info-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(71, 85, 105, 0.25);
+    border-radius: 10px;
+    transition: all 0.2s;
+}
+
+.system-info-card:hover {
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.svc-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.svc-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.svc-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f1f5f9;
+}
+
+.svc-version {
+    font-size: 0.72rem;
+    color: #64748b;
+}
+
+.svc-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.svc-status-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.svc-uptime {
+    font-size: 0.65rem;
+    color: #475569;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 @media (max-width: 768px) {
     .settings-page {
         padding: 16px;

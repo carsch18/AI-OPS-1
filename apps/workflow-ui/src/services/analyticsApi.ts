@@ -1,14 +1,19 @@
 /**
- * Analytics API Service - Phase 7F
+ * Analytics API Service — FULLY REAL, ZERO MOCKS
  * 
- * Connects to analytics and metrics backend APIs:
- * - System metrics and performance data
- * - Execution analytics and trends
- * - Event statistics and history
- * - Dashboard widgets data
+ * Connects to REAL backend APIs:
+ * - Workflow Engine (port 8001): events, issues, workflows, executions, remediation stats
+ * - Brain (port 8000): system metrics from Netdata (CPU, memory, disk, network)
+ * 
+ * RULES:
+ * 1. NO mock data generators. EVER.
+ * 2. If an API fails → throw an error or return empty defaults (zeros, empty arrays)
+ * 3. Every number displayed comes from a real backend response
+ * 4. Error states are propagated honestly to the UI
  */
 
-const API_BASE = 'http://localhost:8001';
+const WORKFLOW_API = 'http://localhost:8001';
+const BRAIN_API = 'http://localhost:8000';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES & INTERFACES
@@ -91,27 +96,68 @@ export interface ChartData {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// API FUNCTIONS
+// EMPTY DEFAULTS — These are zeros, not fake data. They represent "no data".
+// ═══════════════════════════════════════════════════════════════════════════
+
+const EMPTY_SYSTEM_METRICS: SystemMetrics = {
+    timestamp: new Date().toISOString(),
+    cpu_usage: 0,
+    memory_usage: 0,
+    disk_usage: 0,
+    network_in_mbps: 0,
+    network_out_mbps: 0,
+    active_connections: 0,
+};
+
+const EMPTY_EXECUTION_STATS: ExecutionStats = {
+    total_executions: 0,
+    successful_executions: 0,
+    failed_executions: 0,
+    avg_duration_ms: 0,
+    executions_by_hour: [],
+    executions_by_status: [],
+};
+
+const EMPTY_ISSUE_STATS: IssueStats = {
+    total_detected: 0,
+    total_resolved: 0,
+    avg_resolution_ms: 0,
+    by_severity: [],
+    by_category: [],
+    resolution_trend: [],
+};
+
+const EMPTY_EVENT_STATS: EventStats = {
+    total_events: 0,
+    events_per_minute: 0,
+    by_type: {},
+    by_channel: {},
+};
+
+const EMPTY_WORKFLOW_STATS: WorkflowStats = {
+    total_workflows: 0,
+    active_workflows: 0,
+    by_trigger_type: {},
+    most_executed: [],
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NORMALIZATION — Ensures safe shapes even if backend returns partial data
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Normalize raw API data into a guaranteed-safe DashboardOverview.
- * Every nested array/object gets a fallback so .map() calls never crash.
+ * Every nested array/object gets a default so .map() calls never crash.
+ * Defaults are zeros/empty — NOT random fake numbers.
  */
 function normalizeDashboardOverview(raw: Partial<DashboardOverview> | null | undefined): DashboardOverview {
-    const fallbackSystem = generateMockSystemMetrics();
-    const fallbackExec = generateMockExecutionStats();
-    const fallbackIssues = generateMockIssueStats();
-    const fallbackEvents = generateMockEventStats();
-    const fallbackWorkflows = generateMockWorkflowStats();
-
     if (!raw || typeof raw !== 'object') {
         return {
-            system: fallbackSystem,
-            executions: fallbackExec,
-            issues: fallbackIssues,
-            events: fallbackEvents,
-            workflows: fallbackWorkflows,
+            system: { ...EMPTY_SYSTEM_METRICS },
+            executions: { ...EMPTY_EXECUTION_STATS },
+            issues: { ...EMPTY_ISSUE_STATS },
+            events: { ...EMPTY_EVENT_STATS },
+            workflows: { ...EMPTY_WORKFLOW_STATS },
         };
     }
 
@@ -123,7 +169,7 @@ function normalizeDashboardOverview(raw: Partial<DashboardOverview> | null | und
 
     return {
         system: {
-            timestamp: sys?.timestamp || fallbackSystem.timestamp,
+            timestamp: sys?.timestamp || new Date().toISOString(),
             cpu_usage: Number(sys?.cpu_usage) || 0,
             memory_usage: Number(sys?.memory_usage) || 0,
             disk_usage: Number(sys?.disk_usage) || 0,
@@ -162,247 +208,202 @@ function normalizeDashboardOverview(raw: Partial<DashboardOverview> | null | und
     };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// API FUNCTIONS — All calls go to REAL backend endpoints
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
- * Get dashboard overview with all key metrics.
- * Always returns a fully-normalized object — never crashes on partial data.
+ * Get dashboard overview with all key metrics from REAL backends.
+ * Fetches from both workflow-engine and brain in parallel.
+ * Returns normalized data — zeros for any endpoint that fails (never fake data).
  */
 export async function getDashboardOverview(): Promise<DashboardOverview> {
-    try {
-        // Fetch from multiple endpoints and combine
-        const [eventStats, health] = await Promise.all([
-            getEventStats().catch(() => null),
-            getSystemHealth().catch(() => null),
-        ]);
+    // Fetch from real endpoints in parallel — each can fail independently
+    const [systemMetrics, eventStats, executionStats, issueStats, workflowStats] = await Promise.all([
+        getSystemMetrics().catch(() => undefined),
+        getEventStats().catch(() => undefined),
+        getExecutionStats().catch(() => undefined),
+        getIssueStats().catch(() => undefined),
+        getWorkflowStats().catch(() => undefined),
+    ]);
 
-        // Build overview from available data
-        const raw: Partial<DashboardOverview> = {
-            system: health?.metrics || undefined,
-            executions: await getExecutionStats().catch(() => undefined),
-            issues: await getIssueStats().catch(() => undefined),
-            events: eventStats || undefined,
-            workflows: await getWorkflowStats().catch(() => undefined),
-        };
+    const raw: Partial<DashboardOverview> = {
+        system: systemMetrics || undefined,
+        executions: executionStats || undefined,
+        issues: issueStats || undefined,
+        events: eventStats || undefined,
+        workflows: workflowStats || undefined,
+    };
 
-        return normalizeDashboardOverview(raw);
-    } catch {
-        // Total failure — return fully mocked data
-        return normalizeDashboardOverview(null);
-    }
+    return normalizeDashboardOverview(raw);
 }
 
 /**
- * Get event statistics
+ * Get REAL system metrics from Brain's monitoring service.
+ * Brain pulls from Netdata — these are actual CPU/memory/disk readings.
+ */
+export async function getSystemMetrics(): Promise<SystemMetrics> {
+    const response = await fetch(`${BRAIN_API}/api/metrics/infrastructure`);
+    if (!response.ok) throw new Error(`Brain metrics unavailable: ${response.status} ${response.statusText}`);
+    const data = await response.json();
+
+    // Map brain's infrastructure metrics to our SystemMetrics interface
+    return {
+        timestamp: new Date().toISOString(),
+        cpu_usage: Number(data.cpu_percent ?? data.cpu_usage ?? 0),
+        memory_usage: Number(data.memory_percent ?? data.memory_usage ?? 0),
+        disk_usage: Number(data.disk_percent ?? data.disk_usage ?? 0),
+        network_in_mbps: Number(data.network_in ?? data.network_in_mbps ?? 0),
+        network_out_mbps: Number(data.network_out ?? data.network_out_mbps ?? 0),
+        active_connections: Number(data.active_connections ?? data.connections ?? 0),
+    };
+}
+
+/**
+ * Get REAL event statistics from workflow engine's event bus.
  */
 export async function getEventStats(): Promise<EventStats> {
-    const response = await fetch(`${API_BASE}/api/events/stats`);
-    if (!response.ok) throw new Error(`Failed to fetch event stats: ${response.statusText}`);
+    const response = await fetch(`${WORKFLOW_API}/api/events/stats`);
+    if (!response.ok) throw new Error(`Event stats unavailable: ${response.status} ${response.statusText}`);
     return response.json();
 }
 
 /**
- * Get event history
+ * Get REAL event history from workflow engine.
+ * No mock fallback — if backend is down, error propagates to UI.
  */
 export async function getEventHistory(options: {
     event_type?: string;
     channel?: string;
     limit?: number;
 } = {}): Promise<EventHistoryItem[]> {
-    try {
-        const params = new URLSearchParams();
-        if (options.event_type) params.append('event_type', options.event_type);
-        if (options.channel) params.append('channel', options.channel);
-        if (options.limit) params.append('limit', String(options.limit));
+    const params = new URLSearchParams();
+    if (options.event_type) params.append('event_type', options.event_type);
+    if (options.channel) params.append('channel', options.channel);
+    if (options.limit) params.append('limit', String(options.limit));
 
-        const response = await fetch(`${API_BASE}/api/events/history?${params.toString()}`);
-        if (!response.ok) throw new Error(`Failed to fetch event history: ${response.statusText}`);
+    const response = await fetch(`${WORKFLOW_API}/api/events/history?${params.toString()}`);
+    if (!response.ok) throw new Error(`Event history unavailable: ${response.status} ${response.statusText}`);
 
-        const data = await response.json();
-        return data.events;
-    } catch {
-        // Return mock events when backend unavailable
-        return generateMockEventHistory(options.limit || 10);
-    }
-}
-
-function generateMockEventHistory(limit: number): EventHistoryItem[] {
-    const eventTypes = ['workflow.started', 'workflow.completed', 'issue.detected', 'remediation.triggered', 'system.alert'];
-    const channels = ['workflows', 'issues', 'alerts', 'metrics'];
-    const events: EventHistoryItem[] = [];
-
-    for (let i = 0; i < limit; i++) {
-        events.push({
-            id: `evt-${i}`,
-            event_type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
-            channel: channels[Math.floor(Math.random() * channels.length)],
-            timestamp: new Date(Date.now() - i * 60000).toISOString(),
-            data: { source: 'demo' },
-        });
-    }
-    return events;
+    const data = await response.json();
+    return Array.isArray(data.events) ? data.events : Array.isArray(data) ? data : [];
 }
 
 /**
- * Get system health
+ * Get REAL system health from workflow engine.
  */
 export async function getSystemHealth(): Promise<{
     status: string;
     uptime: number;
     metrics: SystemMetrics;
 }> {
-    const response = await fetch(`${API_BASE}/health`);
-    if (!response.ok) throw new Error(`Failed to fetch health: ${response.statusText}`);
+    const response = await fetch(`${WORKFLOW_API}/health`);
+    if (!response.ok) throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
     return response.json();
 }
 
 /**
- * Get execution statistics
+ * Get REAL execution statistics from workflow engine.
+ * Uses /api/remediation/stats which has real execution data from DB.
  */
 export async function getExecutionStats(): Promise<ExecutionStats> {
-    const response = await fetch(`${API_BASE}/api/analytics/executions`);
-    if (!response.ok) throw new Error(`Failed to fetch execution stats: ${response.statusText}`);
-    return response.json();
+    // Try the remediation stats endpoint first (has execution counts)
+    const response = await fetch(`${WORKFLOW_API}/api/remediation/stats`);
+    if (!response.ok) throw new Error(`Execution stats unavailable: ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+
+    // Map the remediation stats to our ExecutionStats interface
+    return {
+        total_executions: Number(data.total_executions ?? data.total ?? 0),
+        successful_executions: Number(data.successful_executions ?? data.successful ?? data.completed ?? 0),
+        failed_executions: Number(data.failed_executions ?? data.failed ?? 0),
+        avg_duration_ms: Number(data.avg_duration_ms ?? data.avg_duration ?? 0),
+        executions_by_hour: Array.isArray(data.executions_by_hour) ? data.executions_by_hour : [],
+        executions_by_status: Array.isArray(data.executions_by_status) ? data.executions_by_status : [],
+    };
 }
 
 /**
- * Get issue statistics  
+ * Get REAL issue statistics from workflow engine's issue detector.
  */
 export async function getIssueStats(): Promise<IssueStats> {
-    const response = await fetch(`${API_BASE}/api/issues/stats`);
-    if (!response.ok) throw new Error(`Failed to fetch issue stats: ${response.statusText}`);
+    const response = await fetch(`${WORKFLOW_API}/api/issues/stats`);
+    if (!response.ok) throw new Error(`Issue stats unavailable: ${response.status} ${response.statusText}`);
     return response.json();
 }
 
 /**
- * Get workflow statistics
+ * Get REAL workflow statistics from workflow engine.
+ * Derives stats from the actual workflow list endpoint.
  */
 export async function getWorkflowStats(): Promise<WorkflowStats> {
-    const response = await fetch(`${API_BASE}/api/analytics/workflows`);
-    if (!response.ok) throw new Error(`Failed to fetch workflow stats: ${response.statusText}`);
-    return response.json();
+    const response = await fetch(`${WORKFLOW_API}/api/workflows`);
+    if (!response.ok) throw new Error(`Workflow stats unavailable: ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+    const workflows = Array.isArray(data.workflows) ? data.workflows : Array.isArray(data) ? data : [];
+
+    // Derive real stats from the actual workflow list
+    const activeWorkflows = workflows.filter((w: Record<string, unknown>) => w.is_active);
+    const triggerCounts: Record<string, number> = {};
+    for (const w of workflows) {
+        const trigger = String(w.trigger_type || 'manual');
+        triggerCounts[trigger] = (triggerCounts[trigger] || 0) + 1;
+    }
+
+    return {
+        total_workflows: workflows.length,
+        active_workflows: activeWorkflows.length,
+        by_trigger_type: triggerCounts,
+        most_executed: [], // Populated by execution history when available
+    };
 }
 
 /**
- * Get time series metrics
+ * Get REAL time series metrics from Brain's monitoring service.
+ * Maps metric types to the appropriate Brain endpoint.
  */
 export async function getTimeSeriesMetrics(
     metricType: MetricType,
     timeRange: TimeRange
 ): Promise<TimeSeriesDataPoint[]> {
-    const response = await fetch(`${API_BASE}/api/analytics/metrics/${metricType}?range=${timeRange}`);
-    if (!response.ok) {
-        // Return mock data if endpoint not available
-        return generateMockTimeSeries(metricType, timeRange);
+    // Map metric types to real Brain endpoints
+    const endpointMap: Record<MetricType, string> = {
+        cpu: '/api/metrics/infrastructure',
+        memory: '/api/metrics/infrastructure',
+        disk: '/api/metrics/infrastructure',
+        network: '/api/metrics/infrastructure',
+        latency: '/api/metrics/performance',
+        throughput: '/api/metrics/performance',
+    };
+
+    const endpoint = endpointMap[metricType];
+    const response = await fetch(`${BRAIN_API}${endpoint}?range=${timeRange}&metric=${metricType}`);
+    if (!response.ok) throw new Error(`Metrics unavailable for ${metricType}: ${response.status} ${response.statusText}`);
+
+    const data = await response.json();
+
+    // If the response is already an array of data points, return it
+    if (Array.isArray(data)) return data;
+
+    // If it's a single snapshot, wrap it as a single data point
+    if (data && typeof data === 'object') {
+        const valueKey = metricType === 'cpu' ? 'cpu_percent'
+            : metricType === 'memory' ? 'memory_percent'
+                : metricType === 'disk' ? 'disk_percent'
+                    : metricType === 'network' ? 'network_in'
+                        : metricType === 'latency' ? 'latency_ms'
+                            : 'throughput';
+
+        return [{
+            timestamp: data.timestamp || new Date().toISOString(),
+            value: Number(data[valueKey] ?? 0),
+            label: metricType,
+        }];
     }
-    return response.json();
-}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MOCK DATA GENERATORS (for demo when backend not available)
-// ═══════════════════════════════════════════════════════════════════════════
-
-function generateMockSystemMetrics(): SystemMetrics {
-    return {
-        timestamp: new Date().toISOString(),
-        cpu_usage: 35 + Math.random() * 30,
-        memory_usage: 55 + Math.random() * 20,
-        disk_usage: 40 + Math.random() * 15,
-        network_in_mbps: 50 + Math.random() * 100,
-        network_out_mbps: 30 + Math.random() * 80,
-        active_connections: Math.floor(100 + Math.random() * 200),
-    };
-}
-
-function generateMockExecutionStats(): ExecutionStats {
-    const hours = Array.from({ length: 24 }, (_, i) => ({
-        hour: `${String(i).padStart(2, '0')}:00`,
-        count: Math.floor(10 + Math.random() * 40),
-    }));
-
-    return {
-        total_executions: 1247,
-        successful_executions: 1189,
-        failed_executions: 58,
-        avg_duration_ms: 3420,
-        executions_by_hour: hours,
-        executions_by_status: [
-            { status: 'completed', count: 1189 },
-            { status: 'failed', count: 58 },
-            { status: 'running', count: 3 },
-        ],
-    };
-}
-
-function generateMockIssueStats(): IssueStats {
-    return {
-        total_detected: 342,
-        total_resolved: 318,
-        avg_resolution_ms: 125000,
-        by_severity: [
-            { severity: 'critical', count: 12 },
-            { severity: 'high', count: 45 },
-            { severity: 'medium', count: 128 },
-            { severity: 'low', count: 157 },
-        ],
-        by_category: [
-            { category: 'compute', count: 89 },
-            { category: 'storage', count: 67 },
-            { category: 'network', count: 54 },
-            { category: 'container', count: 78 },
-            { category: 'application', count: 54 },
-        ],
-        resolution_trend: Array.from({ length: 7 }, (_, i) => ({
-            date: new Date(Date.now() - (6 - i) * 86400000).toISOString().split('T')[0],
-            detected: Math.floor(40 + Math.random() * 20),
-            resolved: Math.floor(35 + Math.random() * 25),
-        })),
-    };
-}
-
-function generateMockEventStats(): EventStats {
-    return {
-        total_events: 15234,
-        events_per_minute: 42,
-        by_type: {
-            'workflow.execution': 5420,
-            'issue.detected': 3200,
-            'issue.resolved': 2980,
-            'remediation.started': 1890,
-            'system.health': 1744,
-        },
-        by_channel: {
-            global: 8500,
-            workflows: 4200,
-            issues: 2534,
-        },
-    };
-}
-
-function generateMockWorkflowStats(): WorkflowStats {
-    return {
-        total_workflows: 24,
-        active_workflows: 18,
-        by_trigger_type: {
-            manual: 8,
-            schedule: 6,
-            webhook: 5,
-            event: 5,
-        },
-        most_executed: [
-            { workflow_id: 'wf-1', name: 'Memory Crisis Recovery', count: 234 },
-            { workflow_id: 'wf-2', name: 'Disk Cleanup', count: 189 },
-            { workflow_id: 'wf-3', name: 'Container Restart', count: 156 },
-        ],
-    };
-}
-
-function generateMockTimeSeries(metricType: MetricType, timeRange: TimeRange): TimeSeriesDataPoint[] {
-    const points = timeRange === '1h' ? 60 : timeRange === '6h' ? 72 : timeRange === '24h' ? 96 : 168;
-    const baseValue = metricType === 'cpu' ? 40 : metricType === 'memory' ? 60 : 30;
-
-    return Array.from({ length: points }, (_, i) => ({
-        timestamp: new Date(Date.now() - (points - i) * 60000).toISOString(),
-        value: baseValue + Math.random() * 30 + Math.sin(i / 10) * 10,
-    }));
+    return [];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -446,6 +447,7 @@ export function getMetricColor(value: number, thresholds: { warn: number; critic
 
 export default {
     getDashboardOverview,
+    getSystemMetrics,
     getEventStats,
     getEventHistory,
     getSystemHealth,

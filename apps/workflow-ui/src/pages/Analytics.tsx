@@ -1,7 +1,12 @@
 /**
  * Analytics Page - MAANG-Grade Metrics Dashboard
  * 
- * Features:
+ * PHASE 3 ENHANCEMENTS:
+ * - CSV/JSON data export for dashboard metrics
+ * - Chart drill-down modals (click any chart for detailed view)
+ * - 7-day × 24-hour event heatmap grid
+ * 
+ * Existing features preserved:
  * - Overview cards with key metrics
  * - Time range selector
  * - Execution trends chart
@@ -10,7 +15,7 @@
  * - System health indicators
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import {
     getDashboardOverview,
@@ -40,8 +45,187 @@ import {
     TrendingUp,
     TrendingDown,
     AlertTriangle,
+    Download,
+    X,
 } from '../components/Icons';
 import './Analytics.css';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3: DATA EXPORT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function downloadBlob(content: string, filename: string, mime: string) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function exportDashboard(overview: DashboardOverview, format: 'csv' | 'json') {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    if (format === 'json') {
+        downloadBlob(JSON.stringify(overview, null, 2), `analytics_${ts}.json`, 'application/json');
+    } else {
+        const rows = [
+            ['Metric', 'Value'],
+            ['CPU Usage', String(overview.system.cpu_usage)],
+            ['Memory Usage', String(overview.system.memory_usage)],
+            ['Total Executions', String(overview.executions.total_executions)],
+            ['Successful Executions', String(overview.executions.successful_executions)],
+            ['Failed Executions', String(overview.executions.failed_executions)],
+            ['Total Issues', String(overview.issues.total_detected)],
+            ['Resolved Issues', String(overview.issues.total_resolved)],
+            ['Events/min', String(overview.events.events_per_minute)],
+            ['Active Workflows', String(overview.workflows.total_workflows)],
+        ];
+        downloadBlob(rows.map(r => r.join(',')).join('\n'), `analytics_${ts}.csv`, 'text/csv');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3: CHART DRILL-DOWN MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface DrillDownModalProps {
+    title: string;
+    data: { label: string; value: number; color?: string }[];
+    onClose: () => void;
+}
+
+function DrillDownModal({ title, data, onClose }: DrillDownModalProps) {
+    const total = data.reduce((s, d) => s + d.value, 0);
+    const sorted = [...data].sort((a, b) => b.value - a.value);
+    const max = sorted[0]?.value || 1;
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content drill-down-modal" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h2>{title} — Detail</h2>
+                    <button className="modal-close" onClick={onClose}><X size={18} /></button>
+                </div>
+                <div className="drill-down-body">
+                    <div className="drill-down-total">
+                        Total: <strong>{total.toLocaleString()}</strong>
+                    </div>
+                    <div className="drill-down-rows">
+                        {sorted.map((item, i) => (
+                            <div key={i} className="drill-down-row">
+                                <span className="drill-label">{item.label}</span>
+                                <div className="drill-bar-bg">
+                                    <div
+                                        className="drill-bar-fill"
+                                        style={{
+                                            width: `${(item.value / max) * 100}%`,
+                                            backgroundColor: item.color || '#8b5cf6',
+                                        }}
+                                    />
+                                </div>
+                                <span className="drill-value">{item.value.toLocaleString()}</span>
+                                <span className="drill-pct">
+                                    {total > 0 ? `${((item.value / total) * 100).toFixed(1)}%` : '—'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3: HEATMAP
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface HeatmapProps {
+    events: EventHistoryItem[];
+}
+
+function EventHeatmap({ events }: HeatmapProps) {
+    // Build a 7-day × 24-hour grid from actual event timestamps
+    const heatmapData = useMemo(() => {
+        const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+        const now = Date.now();
+        const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+
+        events.forEach(e => {
+            const ts = new Date(e.timestamp).getTime();
+            if (ts >= sevenDaysAgo) {
+                const dayIndex = Math.floor((now - ts) / (24 * 60 * 60 * 1000));
+                const hour = new Date(e.timestamp).getHours();
+                if (dayIndex >= 0 && dayIndex < 7) {
+                    grid[6 - dayIndex][hour]++;
+                }
+            }
+        });
+        return grid;
+    }, [events]);
+
+    const maxVal = Math.max(1, ...heatmapData.flat());
+
+    const dayLabels = useMemo(() => {
+        const days: string[] = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+            days.push(d.toLocaleDateString('en', { weekday: 'short' }));
+        }
+        return days;
+    }, []);
+
+    const getHeatColor = (val: number) => {
+        if (val === 0) return 'rgba(71, 85, 105, 0.2)';
+        const intensity = val / maxVal;
+        if (intensity > 0.75) return 'rgba(139, 92, 246, 0.9)';
+        if (intensity > 0.5) return 'rgba(139, 92, 246, 0.6)';
+        if (intensity > 0.25) return 'rgba(139, 92, 246, 0.35)';
+        return 'rgba(139, 92, 246, 0.15)';
+    };
+
+    return (
+        <div className="heatmap-container">
+            <h3><Activity size={18} /> Event Activity Heatmap</h3>
+            <p className="heatmap-subtitle">Last 7 days × 24 hours</p>
+            <div className="heatmap-grid">
+                {/* Hour labels (top) */}
+                <div className="heatmap-hour-labels">
+                    <div className="heatmap-corner" />
+                    {Array.from({ length: 24 }, (_, h) => (
+                        <div key={h} className="heatmap-hour-label">
+                            {h % 6 === 0 ? `${h}h` : ''}
+                        </div>
+                    ))}
+                </div>
+                {/* Rows */}
+                {heatmapData.map((row, dayIdx) => (
+                    <div key={dayIdx} className="heatmap-row">
+                        <div className="heatmap-day-label">{dayLabels[dayIdx]}</div>
+                        {row.map((val, hourIdx) => (
+                            <div
+                                key={hourIdx}
+                                className="heatmap-cell"
+                                style={{ backgroundColor: getHeatColor(val) }}
+                                title={`${dayLabels[dayIdx]} ${hourIdx}:00 — ${val} events`}
+                            />
+                        ))}
+                    </div>
+                ))}
+            </div>
+            <div className="heatmap-legend">
+                <span>Less</span>
+                <div className="legend-block" style={{ backgroundColor: 'rgba(71, 85, 105, 0.2)' }} />
+                <div className="legend-block" style={{ backgroundColor: 'rgba(139, 92, 246, 0.15)' }} />
+                <div className="legend-block" style={{ backgroundColor: 'rgba(139, 92, 246, 0.35)' }} />
+                <div className="legend-block" style={{ backgroundColor: 'rgba(139, 92, 246, 0.6)' }} />
+                <div className="legend-block" style={{ backgroundColor: 'rgba(139, 92, 246, 0.9)' }} />
+                <span>More</span>
+            </div>
+        </div>
+    );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SUBCOMPONENTS
@@ -135,13 +319,18 @@ function SparklineChart({ data, height = 40, color = '#8b5cf6' }: SparklineChart
 interface BarChartProps {
     data: { label: string; value: number; color?: string }[];
     height?: number;
+    onClick?: () => void;
 }
 
-function BarChart({ data, height = 200 }: BarChartProps) {
+function BarChart({ data, height = 200, onClick }: BarChartProps) {
     const max = Math.max(...data.map(d => d.value)) || 1;
 
     return (
-        <div className="bar-chart" style={{ height }}>
+        <div
+            className={`bar-chart ${onClick ? 'clickable' : ''}`}
+            style={{ height }}
+            onClick={onClick}
+        >
             {data.map((item, i) => (
                 <div key={i} className="bar-item">
                     <div
@@ -163,9 +352,10 @@ function BarChart({ data, height = 200 }: BarChartProps) {
 interface DonutChartProps {
     data: { label: string; value: number; color: string }[];
     size?: number;
+    onClick?: () => void;
 }
 
-function DonutChart({ data, size = 160 }: DonutChartProps) {
+function DonutChart({ data, size = 160, onClick }: DonutChartProps) {
     const total = data.reduce((sum, d) => sum + d.value, 0) || 1;
     let currentAngle = 0;
 
@@ -177,7 +367,11 @@ function DonutChart({ data, size = 160 }: DonutChartProps) {
     });
 
     return (
-        <div className="donut-chart" style={{ width: size, height: size }}>
+        <div
+            className={`donut-chart ${onClick ? 'clickable' : ''}`}
+            style={{ width: size, height: size }}
+            onClick={onClick}
+        >
             <svg viewBox="0 0 100 100">
                 {segments.map((seg, i) => {
                     const startRad = (seg.startAngle - 90) * (Math.PI / 180);
@@ -251,6 +445,15 @@ export default function AnalyticsPage() {
     const [error, setError] = useState<string | null>(null);
     const [timeRange, setTimeRange] = useState<TimeRange>('24h');
 
+    // Phase 3: Drill-down state
+    const [drillDown, setDrillDown] = useState<{
+        title: string;
+        data: { label: string; value: number; color?: string }[];
+    } | null>(null);
+
+    // Phase 3: Export dropdown
+    const [showExport, setShowExport] = useState(false);
+
     // Fetch data — getDashboardOverview now handles all normalization internally
     const fetchData = useCallback(async () => {
         try {
@@ -284,6 +487,37 @@ export default function AnalyticsPage() {
         const interval = setInterval(fetchData, 30000);
         return () => clearInterval(interval);
     }, [fetchData]);
+
+    // Drill-down data helpers
+    const executionStatusData = useMemo(() => {
+        if (!overview) return [];
+        return overview.executions.executions_by_status.map(s => ({
+            label: s.status,
+            value: s.count,
+            color: s.status === 'completed' ? '#22c55e' :
+                s.status === 'failed' ? '#ef4444' : '#fbbf24',
+        }));
+    }, [overview]);
+
+    const severityData = useMemo(() => {
+        if (!overview) return [];
+        return overview.issues.by_severity.map(s => ({
+            label: s.severity,
+            value: s.count,
+            color: s.severity === 'critical' ? '#ef4444' :
+                s.severity === 'high' ? '#f59e0b' :
+                    s.severity === 'medium' ? '#eab308' : '#22c55e',
+        }));
+    }, [overview]);
+
+    const categoryData = useMemo(() => {
+        if (!overview) return [];
+        return overview.issues.by_category.slice(0, 5).map(c => ({
+            label: (c.category ?? 'N/A').substring(0, 8),
+            value: c.count,
+            color: '#8b5cf6',
+        }));
+    }, [overview]);
 
     // Loading state
     if (loading && !overview) {
@@ -325,6 +559,27 @@ export default function AnalyticsPage() {
                 </div>
                 <div className="header-right">
                     <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+
+                    {/* Phase 3: Export Button */}
+                    <div className="export-dropdown">
+                        <button
+                            className="btn-export"
+                            onClick={() => setShowExport(!showExport)}
+                        >
+                            <Download size={16} /> Export
+                        </button>
+                        {showExport && (
+                            <div className="export-menu">
+                                <button onClick={() => { exportDashboard(overview!, 'csv'); setShowExport(false); }}>
+                                    Export CSV
+                                </button>
+                                <button onClick={() => { exportDashboard(overview!, 'json'); setShowExport(false); }}>
+                                    Export JSON
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                     <button className="btn-refresh" onClick={fetchData}>
                         <RefreshCw size={16} /> Refresh
                     </button>
@@ -391,43 +646,34 @@ export default function AnalyticsPage() {
                     </div>
                 </div>
 
-                {/* Execution by Status */}
+                {/* Execution by Status — Phase 3: clickable */}
                 <div className="chart-card">
                     <h3><BarChart3 size={18} /> Execution Status</h3>
                     <DonutChart
-                        data={executions.executions_by_status.map(s => ({
-                            label: s.status,
-                            value: s.count,
-                            color: s.status === 'completed' ? '#22c55e' :
-                                s.status === 'failed' ? '#ef4444' : '#fbbf24',
-                        }))}
+                        data={executionStatusData}
+                        onClick={() => setDrillDown({ title: 'Execution Status', data: executionStatusData })}
                     />
+                    <p className="chart-hint">Click chart to drill down</p>
                 </div>
 
-                {/* Issues by Severity */}
+                {/* Issues by Severity — Phase 3: clickable */}
                 <div className="chart-card">
                     <h3><Flame size={18} /> Issues by Severity</h3>
                     <BarChart
-                        data={issues.by_severity.map(s => ({
-                            label: s.severity,
-                            value: s.count,
-                            color: s.severity === 'critical' ? '#ef4444' :
-                                s.severity === 'high' ? '#f59e0b' :
-                                    s.severity === 'medium' ? '#eab308' : '#22c55e',
-                        }))}
+                        data={severityData}
+                        onClick={() => setDrillDown({ title: 'Issues by Severity', data: severityData })}
                     />
+                    <p className="chart-hint">Click chart to drill down</p>
                 </div>
 
-                {/* Issues by Category */}
+                {/* Issues by Category — Phase 3: clickable */}
                 <div className="chart-card">
                     <h3><FolderOpen size={18} /> Issues by Category</h3>
                     <BarChart
-                        data={issues.by_category.slice(0, 5).map(c => ({
-                            label: c.category.substring(0, 8),
-                            value: c.count,
-                            color: '#8b5cf6',
-                        }))}
+                        data={categoryData}
+                        onClick={() => setDrillDown({ title: 'Issues by Category', data: categoryData })}
                     />
+                    <p className="chart-hint">Click chart to drill down</p>
                 </div>
 
                 {/* Workflows */}
@@ -449,6 +695,20 @@ export default function AnalyticsPage() {
                     <EventFeed events={events} />
                 </div>
             </div>
+
+            {/* Phase 3: Event Heatmap */}
+            <div className="chart-card full-width">
+                <EventHeatmap events={events} />
+            </div>
+
+            {/* Phase 3: Drill-down Modal */}
+            {drillDown && (
+                <DrillDownModal
+                    title={drillDown.title}
+                    data={drillDown.data}
+                    onClose={() => setDrillDown(null)}
+                />
+            )}
         </div>
     );
 }
