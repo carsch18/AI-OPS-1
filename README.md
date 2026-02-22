@@ -46,11 +46,11 @@ AIOps Command Center is a **production-grade autonomous operations platform** th
 ## 📸 Screenshots & UI Tour
 
 ### 🏠 Command Center (Dashboard)
-![Command Center](images/command-center.png)
+![Command Center](docs/screenshots/command-center.png)
 *Real-time infrastructure metrics, system health indicators, active alerts, and AI-powered insights — all at a glance*
 
 ### 🤖 AI Chat — Cerebras LLM Integration
-![AI Chat Interface](images/ai-chat-cerebras.png)
+![AI Chat Interface](docs/screenshots/ai-chat.png)
 *Natural language chat with CEREBRO AI Agent, powered by Cerebras Llama 3.1 8B with real-time monitoring tool access*
 
 ### 💬 Live AI Response
@@ -58,11 +58,11 @@ AIOps Command Center is a **production-grade autonomous operations platform** th
 *Real Cerebras LLM responses with tool invocations — the AI can query system metrics, diagnose issues, and propose remediations*
 
 ### 🚨 Incidents Dashboard
-![Incidents](images/incidents.png)
+![Incidents](docs/screenshots/incidents.png)
 *Centralized incident tracking with severity levels, status management, and AI-assisted root cause analysis*
 
 ### 🔔 Alerts Management
-![Alerts](images/alerts.png)
+![Alerts](docs/screenshots/alerts.png)
 *Real-time alert monitoring with configurable thresholds, severity classification, and auto-escalation*
 
 ### 🤖 Autonomous Operations
@@ -70,27 +70,27 @@ AIOps Command Center is a **production-grade autonomous operations platform** th
 *Self-healing infrastructure with autonomous agent orchestration and WebSocket-powered real-time event streaming*
 
 ### 🔧 Visual Workflow Builder
-![Workflow Builder](images/workflow-builder.png)
+![Workflow Builder](docs/screenshots/workflow-builder.png)
 *Drag-and-drop workflow canvas with 15+ node types — build complex remediation pipelines visually*
 
 ### 📋 Issues Tracker
-![Issues](images/issues.png)
+![Issues](docs/screenshots/issues.png)
 *AI-categorized issue management with severity scoring, trend analysis, and automated triage*
 
 ### 🛠️ Remediation Library
-![Remediation Library](images/remediation-library.png)
+![Remediation Library](docs/screenshots/remediation-library.png)
 *30+ pre-built remediation workflows including Memory Crisis Recovery, CPU Spike Response, Disk Space Cleanup, and more*
 
 ### ⚡ Executors
-![Executors](images/executors.png)
+![Executors](docs/screenshots/executors.png)
 *Multi-executor infrastructure — SSH, Docker, and API execution engines with host configuration and health monitoring*
 
 ### 📈 Analytics Dashboard
-![Analytics](images/analytics.png)
+![Analytics](docs/screenshots/analytics.png)
 *Comprehensive system performance analytics with CPU/Memory trends, execution status breakdowns, and issue distribution charts*
 
 ### ⚙️ Settings
-![Settings](images/settings.png)
+![Settings](docs/screenshots/settings.png)
 *System configuration with service health monitoring, notification preferences, and API connectivity status*
 
 ---
